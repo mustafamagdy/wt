@@ -1,0 +1,37 @@
+# Development files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Git files
+.git/
+.gitignore
+
+# Editor files
+.vscode/
+.claude/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
+
+# Original script (keep only the bin version)
+wt.sh
+
+# Test files
+test/
+tests/
+*.test.js
+
+# Documentation source
+docs/
+
+# CI/CD
+.github/
+.travis.yml
+.circleci/

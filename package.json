@@ -1,6 +1,6 @@
 {
   "name": "git-wt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
   "main": "bin/wt",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "bash bin/wt help",
-    "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'"
+    "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'",
+    "cp": "mkdir -p bin && cp wt.sh bin/wt && chmod +x bin/wt && cp bin/wt ~/.nvm/versions/node/$(node --version)/bin/ && echo '✅ Copied wt.sh to bin/wt and NVM global bin'"
   },
   "keywords": [
     "git",

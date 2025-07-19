@@ -1,5 +1,5 @@
 {
-  "name": "wr",
+  "name": "worktree-manager",
   "version": "1.0.0",
   "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
   "main": "bin/wt",
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "bash bin/wt help",
-    "postinstall": "echo '\n✅ wr installed! Run \"wt help\" to get started.\n'"
+    "postinstall": "echo '\n✅ worktree-manager installed! Run \"wt help\" to get started.\n'"
   },
   "keywords": [
     "git",
@@ -24,10 +24,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mustafamagdy/wr.git"
+    "url": "https://github.com/mustafamagdy/wt.git"
   },
   "bugs": {
-    "url": "https://github.com/mustafamagdy/wr/issues"
+    "url": "https://github.com/mustafamagdy/wt.git/issues"
   },
   "homepage": "https://github.com/mustafamagdy/wt.git#readme",
   "engines": {

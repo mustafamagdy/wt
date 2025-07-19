@@ -1,6 +1,6 @@
 {
   "name": "git-wt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
   "main": "bin/wt",
   "bin": {

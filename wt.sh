@@ -69,6 +69,17 @@ commit_before() {      # $1=branch  $2=date → commit id
   git rev-list -n 1 --before="$2 23:59" "$1" 2>/dev/null || true
 }
 
+find_matching_worktrees() { # $1=partial_branch_name → array of matching worktree dirs
+  local partial="$1" matches=()
+  ensure_dir
+  for wt_dir in "$WORKTREES_DIR"/*; do
+    [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
+    branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+    [[ "$branch" == *"$partial"* ]] && matches+=("$wt_dir")
+  done
+  printf '%s\n' "${matches[@]}"
+}
+
 # ---------- core features (existing) ----------------------------------------
 list_worktrees() {
   printf "\n%-20s %-25s %-25s %-3s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "D*" "PATH"
@@ -188,14 +199,12 @@ cmd_checkout() {       # $1=branch
   cd "$target" && exec "${SHELL:-/bin/bash}"
 }
 
-cmd_switch_partial() { # $1=partial
+cmd_switch() { # $1=partial
   [[ -n "$1" ]] || { echo "✖ Partial branch name required"; exit 1; }
-  ensure_dir; matches=()
-  for wt_dir in "$WORKTREES_DIR"/*; do
-    [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
-    branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
-    [[ "$branch" == *"$1"* ]] && matches+=("$wt_dir")
-  done
+  local matches=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && matches+=("$line")
+  done < <(find_matching_worktrees "$1")
   case ${#matches[@]} in
     0) echo "✖ No worktree found matching '$1'"; exit 1 ;;
     1) cd "${matches[0]}" && exec "${SHELL:-/bin/bash}" ;;
@@ -222,7 +231,7 @@ case "$cmd" in
   du)                      disk_usage ;;
   create|new)              create_or_checkout "create" "$arg" "$force" ;;
   checkout|co)             cmd_checkout "$arg" ;;
-  switch|sw)               cmd_switch_partial "$arg" ;;
+  switch|sw)               cmd_switch "$arg" ;;
   tag|label)               cmd_tag "$arg" "$arg2" ;;
   switchg|sg)              cmd_switchg "$arg" ;;
   time|tm)                 cmd_time "$arg" ;;

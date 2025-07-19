@@ -16,28 +16,63 @@
 # ----------------------------------------------------------
 set -euo pipefail
 
-WORKTREES_DIR="${HOME}/.worktrees"
+# ---------- os detection ----------------------------------------------------
+detect_os() {
+  case "$(uname -s)" in
+    Darwin*)  echo "macos" ;;
+    Linux*)   echo "linux" ;;
+    CYGWIN*|MINGW*|MSYS*) echo "windows" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+OS=$(detect_os)
+
+# Set worktrees directory with Windows compatibility
+if [[ "$OS" == "windows" ]]; then
+  WORKTREES_DIR="${USERPROFILE:-$HOME}/.worktrees"
+else
+  WORKTREES_DIR="${HOME}/.worktrees"
+fi
 
 # ---------- usage -----------------------------------------------------------
 usage() {
   cat <<EOF
 Usage: wt <command> [options]
 
-Common commands
-  list | ls                        List all worktrees
-  create | new <branch>            Create a new branch + worktree
-  checkout | co <branch>           Checkout an existing branch in worktree
-  switch | sw <partial>            Switch to worktree matching <partial>
-  delete | rm <branch>             Delete a worktree folder (use --force if dirty)
-  push                             Commit & push the current worktree
-  du                               Show disk usage per worktree
-  tag <branch> <tag>               Add a tag (group) to worktree
-  switchg | sg <tag>               Switch to a worktree by tag
-  time | tm <br>@<YYYY-MM-DD>      Create detached time‑machine worktree
-  help                             Show this help
+Git worktree management tool (cross-platform: macOS, Linux, Windows)
 
-Global options
-  -f, --force                      Force overwrite / removal where applicable
+Core commands:
+  list | ls                        List all worktrees with status
+  create | new <branch>            Create new branch + worktree
+  checkout | co <branch>           Checkout existing branch in worktree
+  switch | sw <partial>            Switch to worktree by partial branch name
+  delete | rm <partial>            Delete worktree (supports partial matching)
+
+Workflow commands:
+  push                             Commit all changes & push current worktree
+  du                               Show disk usage per worktree (with total)
+
+Organization commands:
+  tag <partial> <tag>              Tag a worktree with group label
+  switchg | sg <tag>               Switch to worktree by tag
+
+Advanced commands:
+  time | tm <branch>@<YYYY-MM-DD>  Create detached worktree from specific date
+
+Options:
+  -f, --force                      Force operations (overwrite/remove)
+  -h, --help | help               Show this help
+
+Examples:
+  wt create feature/new-ui         # Create new branch + worktree
+  wt sw feat                       # Switch to worktree matching "feat"
+  wt delete test                   # Interactive delete for "test" matches
+  wt tag feat ui                   # Tag feature branch as "ui" group
+  wt sg ui                         # Switch to any worktree tagged "ui"
+  wt time main@2024-01-01          # Time machine to main branch on Jan 1st
+
+Note: All commands support partial matching with interactive selection.
 EOF
 }
 
@@ -47,6 +82,35 @@ branch_from_folder() { echo "${1//-/\/}"; }
 
 require_repo() { git rev-parse --show-toplevel >/dev/null 2>&1 || { echo "✖ Not inside a Git repository"; exit 1; }; }
 ensure_dir()   { mkdir -p "$WORKTREES_DIR"; }
+
+get_shell() {
+  case "$OS" in
+    windows)
+      # Windows environments (Git Bash, MSYS2, Cygwin)
+      if [[ -n "${SHELL:-}" ]]; then
+        echo "$SHELL"
+      elif command -v bash >/dev/null 2>&1; then
+        echo "bash"
+      elif command -v sh >/dev/null 2>&1; then
+        echo "sh"
+      else
+        echo "cmd"
+      fi
+      ;;
+    *)
+      # Unix-like systems (macOS, Linux)
+      if [[ -n "${SHELL:-}" ]]; then
+        echo "$SHELL"
+      elif command -v bash >/dev/null 2>&1; then
+        echo "bash"
+      elif command -v sh >/dev/null 2>&1; then
+        echo "sh"
+      else
+        echo "/bin/sh"
+      fi
+      ;;
+  esac
+}
 
 require_no_folder() {
   local dir="$1" force="$2"
@@ -100,9 +164,13 @@ resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or
         branches+=("$branch")
         echo "  $branch ($wt_dir)" >&2
       done
-      echo -n "Select branch: " >&2
+      echo >&2
+      echo "Select branch:" >&2
+      PS3="Select option (1-${#branches[@]}): "
+      COLUMNS=1
       select branch in "${branches[@]}"; do
         [[ -n "$branch" ]] && { echo "$branch"; return; }
+        echo "Invalid selection. Please choose 1-${#branches[@]}." >&2
       done >&2
       ;;
   esac
@@ -128,9 +196,23 @@ list_worktrees() {
 disk_usage() {
   [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
   printf "\n%-40s %s\n" "WORKTREE" "SIZE"; printf '%0.1s' "-"{1..60}; echo
-  du -sh "$WORKTREES_DIR"/* 2>/dev/null | sort -hr | while read -r size path; do
-    printf "%-40s %s\n" "$(basename "$path")" "$size"
-  done
+  
+  # Handle different sort options between operating systems
+  case "$OS" in
+    linux|windows)
+      # Linux (GNU) and Windows (MSYS2/Git Bash with GNU tools)
+      du -sh "$WORKTREES_DIR"/* 2>/dev/null | sort -h -r | while read -r size path; do
+        printf "%-40s %s\n" "$(basename "$path")" "$size"
+      done
+      ;;
+    *)
+      # macOS (BSD tools)
+      du -sh "$WORKTREES_DIR"/* 2>/dev/null | sort -hr | while read -r size path; do
+        printf "%-40s %s\n" "$(basename "$path")" "$size"
+      done
+      ;;
+  esac
+  
   printf '%0.1s' "-"{1..60}; echo
   total=$(du -sh "$WORKTREES_DIR" 2>/dev/null | cut -f1)
   printf "%-40s %s\n" "TOTAL" "$total"
@@ -171,8 +253,11 @@ delete_worktree() {    # $1=partial_branch $2=force
       done
       echo
       echo "Select branch:"
+      PS3="Select option (1-${#branches[@]}): "
+      COLUMNS=1
       select branch in "${branches[@]}"; do
         [[ -n "$branch" ]] && break
+        echo "Invalid selection. Please choose 1-${#branches[@]}."
       done
       ;;
   esac
@@ -210,7 +295,7 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force
   else
     git -C "$proj_root" worktree add "$target" "$branch"
   fi
-  echo "✓ Worktree ready at: $target"; cd "$target" && exec "${SHELL:-/bin/bash}"
+  echo "✓ Worktree ready at: $target"; cd "$target" && exec "$(get_shell)"
 }
 
 # ---------- new feature helpers --------------------------------------------
@@ -238,8 +323,11 @@ cmd_tag() {            # $1=partial_branch $2=tag
       done
       echo
       echo "Select branch:"
+      PS3="Select option (1-${#branches[@]}): "
+      COLUMNS=1
       select branch in "${branches[@]}"; do
         [[ -n "$branch" ]] && break
+        echo "Invalid selection. Please choose 1-${#branches[@]}."
       done
       ;;
   esac
@@ -258,8 +346,16 @@ cmd_switchg() {        # $1=tag
   done
   case ${#matches[@]} in
     0) echo "✖ No worktree tagged '$1'"; exit 1 ;;
-    1) cd "${matches[0]}" && exec "${SHELL:-/bin/bash}" ;;
-    *) echo "Multiple worktrees have tag '$1':"; select wt in "${matches[@]}"; do [[ -n "$wt" ]] && { cd "$wt" && exec "${SHELL:-/bin/bash}"; }; done ;;
+    1) cd "${matches[0]}" && exec "$(get_shell)" ;;
+    *) 
+      echo "Multiple worktrees have tag '$1':"
+      PS3="Select option (1-${#matches[@]}): "
+      COLUMNS=1
+      select wt in "${matches[@]}"; do 
+        [[ -n "$wt" ]] && { cd "$wt" && exec "$(get_shell)"; }
+        echo "Invalid selection. Please choose 1-${#matches[@]}."
+      done 
+      ;;
   esac
 }
 
@@ -273,7 +369,7 @@ cmd_time() {           # $1=branch@date  (YYYY-MM-DD)
   require_no_folder "$target" "$force"
   git worktree add --detach "$target" "$commit"
   echo "✓ Time‑machine worktree created at $target (commit ${commit:0:7})"
-  cd "$target" && exec "${SHELL:-/bin/bash}"
+  cd "$target" && exec "$(get_shell)"
 }
 
 cmd_checkout() {       # $1=branch
@@ -289,7 +385,7 @@ cmd_checkout() {       # $1=branch
   # If worktree already exists, just switch to it
   if [[ -d "$target" && -e "$target/.git" ]]; then
     echo "✓ Switching to existing worktree at: $target"
-    cd "$target" && exec "${SHELL:-/bin/bash}"
+    cd "$target" && exec "$(get_shell)"
     return
   fi
   
@@ -305,7 +401,7 @@ cmd_checkout() {       # $1=branch
     git worktree add "$target" "$local_branch"
   fi
   echo "✓ Worktree ready at: $target (branch $local_branch)"
-  cd "$target" && exec "${SHELL:-/bin/bash}"
+  cd "$target" && exec "$(get_shell)"
 }
 
 cmd_switch() { # $1=partial
@@ -316,8 +412,16 @@ cmd_switch() { # $1=partial
   done < <(find_matching_worktrees "$1")
   case ${#matches[@]} in
     0) echo "✖ No worktree found matching '$1'"; exit 1 ;;
-    1) cd "${matches[0]}" && exec "${SHELL:-/bin/bash}" ;;
-    *) echo "Multiple matches found:"; select m in "${matches[@]}"; do [[ -n "$m" ]] && { cd "$m" && exec "${SHELL:-/bin/bash}"; }; done ;;
+    1) cd "${matches[0]}" && exec "$(get_shell)" ;;
+    *) 
+      echo "Multiple matches found:"
+      PS3="Select option (1-${#matches[@]}): "
+      COLUMNS=1
+      select m in "${matches[@]}"; do 
+        [[ -n "$m" ]] && { cd "$m" && exec "$(get_shell)"; }
+        echo "Invalid selection. Please choose 1-${#matches[@]}."
+      done 
+      ;;
   esac
 }
 

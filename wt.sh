@@ -80,6 +80,34 @@ find_matching_worktrees() { # $1=partial_branch_name → array of matching workt
   printf '%s\n' "${matches[@]}"
 }
 
+resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or exits
+  local partial="$1" matches=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && matches+=("$line")
+  done < <(find_matching_worktrees "$partial")
+  
+  case ${#matches[@]} in
+    0) echo "✖ No worktree found matching '$partial'" >&2; exit 1 ;;
+    1) 
+      local wt_dir="${matches[0]}"
+      git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")"
+      ;;
+    *) 
+      echo "Multiple worktrees match '$partial':" >&2
+      local branches=()
+      for wt_dir in "${matches[@]}"; do
+        local branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+        branches+=("$branch")
+        echo "  $branch ($wt_dir)" >&2
+      done
+      echo -n "Select branch: " >&2
+      select branch in "${branches[@]}"; do
+        [[ -n "$branch" ]] && { echo "$branch"; return; }
+      done >&2
+      ;;
+  esac
+}
+
 # ---------- core features (existing) ----------------------------------------
 list_worktrees() {
   printf "\n%-20s %-25s %-25s %-3s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "D*" "PATH"
@@ -103,6 +131,9 @@ disk_usage() {
   du -sh "$WORKTREES_DIR"/* 2>/dev/null | sort -hr | while read -r size path; do
     printf "%-40s %s\n" "$(basename "$path")" "$size"
   done
+  printf '%0.1s' "-"{1..60}; echo
+  total=$(du -sh "$WORKTREES_DIR" 2>/dev/null | cut -f1)
+  printf "%-40s %s\n" "TOTAL" "$total"
 }
 
 commit_and_push() {
@@ -117,8 +148,35 @@ commit_and_push() {
   git push -u origin "$current_branch"
 }
 
-delete_worktree() {    # $1=branch $2=force
-  local branch="$1" force="$2" folder target
+delete_worktree() {    # $1=partial_branch $2=force
+  local partial="$1" force="$2" matches=() branch folder target
+  
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && matches+=("$line")
+  done < <(find_matching_worktrees "$partial")
+  
+  case ${#matches[@]} in
+    0) echo "✖ No worktree found matching '$partial'"; exit 1 ;;
+    1) 
+      local wt_dir="${matches[0]}"
+      branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+      ;;
+    *) 
+      echo "Multiple worktrees match '$partial':"
+      local branches=()
+      for wt_dir in "${matches[@]}"; do
+        local br=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+        branches+=("$br")
+        echo "  $br ($wt_dir)"
+      done
+      echo
+      echo "Select branch:"
+      select branch in "${branches[@]}"; do
+        [[ -n "$branch" ]] && break
+      done
+      ;;
+  esac
+  
   folder=$(folder_from_branch "$branch")
   target="$WORKTREES_DIR/$folder"
   [[ -d "$target" ]] || { echo "✖ Worktree not found: $target"; exit 1; }
@@ -133,10 +191,20 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force
   proj_root=$(git rev-parse --show-toplevel)
   folder=$(folder_from_branch "$branch")
   target="$WORKTREES_DIR/$folder"
+  
+  if [[ "$mode" == "create" ]]; then
+    # Check if branch already exists BEFORE removing any worktrees
+    if git -C "$proj_root" show-ref --verify --quiet "refs/heads/$branch"; then
+      echo "✖ Branch '$branch' already exists. Use 'wt checkout $branch' instead."
+      exit 1
+    fi
+  fi
+  
   if [[ -e "$target" ]]; then
     git -C "$proj_root" worktree remove ${force:+--force} "$target" 2>/dev/null || true
     rm -rf "$target"
   fi
+  
   if [[ "$mode" == "create" ]]; then
     git -C "$proj_root" worktree add -b "$branch" "$target"
   else
@@ -146,11 +214,39 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force
 }
 
 # ---------- new feature helpers --------------------------------------------
-cmd_tag() {            # $1=branch $2=tag
+cmd_tag() {            # $1=partial_branch $2=tag
   [[ -n "$1" && -n "$2" ]] || { echo "✖ Usage: wt tag <branch> <tag>"; exit 1; }
-  folder=$(folder_from_branch "$1"); target="$WORKTREES_DIR/$folder"
-  [[ -d "$target" ]] || { echo "✖ Worktree for '$1' not found"; exit 1; }
-  add_tag "$target" "$2" && echo "✓ Tagged '$1' as '$2'"
+  local partial="$1" tag="$2" matches=() branch folder target
+  
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && matches+=("$line")
+  done < <(find_matching_worktrees "$partial")
+  
+  case ${#matches[@]} in
+    0) echo "✖ No worktree found matching '$partial'"; exit 1 ;;
+    1) 
+      local wt_dir="${matches[0]}"
+      branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+      ;;
+    *) 
+      echo "Multiple worktrees match '$partial':"
+      local branches=()
+      for wt_dir in "${matches[@]}"; do
+        local br=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+        branches+=("$br")
+        echo "  $br ($wt_dir)"
+      done
+      echo
+      echo "Select branch:"
+      select branch in "${branches[@]}"; do
+        [[ -n "$branch" ]] && break
+      done
+      ;;
+  esac
+  
+  folder=$(folder_from_branch "$branch"); target="$WORKTREES_DIR/$folder"
+  [[ -d "$target" ]] || { echo "✖ Worktree for '$branch' not found"; exit 1; }
+  add_tag "$target" "$tag" && echo "✓ Tagged '$branch' as '$tag'"
 }
 
 cmd_switchg() {        # $1=tag
@@ -189,7 +285,20 @@ cmd_checkout() {       # $1=branch
   [[ "$local_exists" == false && "$remote_exists" == false ]] && {
     echo "✖ Branch '${local_branch}' does not exist locally or remotely."; exit 1; }
   folder=$(folder_from_branch "$local_branch"); target="$WORKTREES_DIR/$folder"
-  require_no_folder "$target" "$force"
+  
+  # If worktree already exists, just switch to it
+  if [[ -d "$target" && -e "$target/.git" ]]; then
+    echo "✓ Switching to existing worktree at: $target"
+    cd "$target" && exec "${SHELL:-/bin/bash}"
+    return
+  fi
+  
+  # Remove any stale worktree folder if it exists but isn't a valid git worktree
+  if [[ -e "$target" ]]; then
+    [[ "$force" == true ]] || { echo "✖ Folder already exists: $target (use --force to overwrite)"; exit 1; }
+    rm -rf "$target"
+  fi
+  
   if [[ "$local_exists" == false && "$remote_exists" == true ]]; then
     git worktree add -b "$local_branch" "$target" "origin/$local_branch"
   else

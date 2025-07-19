@@ -44,7 +44,7 @@ Git worktree management tool (cross-platform: macOS, Linux, Windows)
 
 Core commands:
   list | ls                        List all worktrees with status
-  create | new <branch>            Create new branch + worktree
+  create | new <branch> [--copy <files>]  Create new branch + worktree (optionally copy files)
   checkout | co <branch>           Checkout existing branch in worktree
   switch | sw <partial>            Switch to worktree by partial branch name
   delete | rm <partial>            Delete worktree (supports partial matching)
@@ -62,10 +62,12 @@ Advanced commands:
 
 Options:
   -f, --force                      Force operations (overwrite/remove)
+  --copy <files>                   Copy comma-separated files from main dir to worktree
   -h, --help | help               Show this help
 
 Examples:
   wt create feature/new-ui         # Create new branch + worktree
+  wt create feature/api --copy .env,.env.local  # Create worktree & copy config files
   wt sw feat                       # Switch to worktree matching "feat"
   wt delete test                   # Interactive delete for "test" matches
   wt tag feat ui                   # Tag feature branch as "ui" group
@@ -270,8 +272,8 @@ delete_worktree() {    # $1=partial_branch $2=force
   rm -rf "$target" && echo "✓ Worktree deleted: $target"
 }
 
-create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force
-  local mode="$1" branch="$2" force="$3" proj_root folder target
+create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_files
+  local mode="$1" branch="$2" force="$3" copy_files="$4" proj_root folder target
   require_repo; ensure_dir
   proj_root=$(git rev-parse --show-toplevel)
   folder=$(folder_from_branch "$branch")
@@ -295,6 +297,24 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force
   else
     git -C "$proj_root" worktree add "$target" "$branch"
   fi
+  
+  # Copy specified files if --copy parameter was provided
+  if [[ -n "$copy_files" && "$mode" == "create" ]]; then
+    IFS=',' read -ra FILES <<< "$copy_files"
+    for file in "${FILES[@]}"; do
+      file=$(echo "$file" | xargs)  # trim whitespace
+      if [[ -f "$proj_root/$file" ]]; then
+        cp "$proj_root/$file" "$target/$file"
+        echo "✓ Copied $file to worktree"
+      elif [[ -e "$proj_root/$file" ]]; then
+        cp -r "$proj_root/$file" "$target/$file"
+        echo "✓ Copied $file to worktree"
+      else
+        echo "⚠ File not found: $file (skipped)"
+      fi
+    done
+  fi
+  
   echo "✓ Worktree ready at: $target"; cd "$target" && exec "$(get_shell)"
 }
 
@@ -428,10 +448,11 @@ cmd_switch() { # $1=partial
 # ---------- argument parsing ------------------------------------------------
 [[ $# -eq 0 ]] && { usage; exit 1; }
 cmd="${1}"; shift
-force=false; positional=()
+force=false; copy_files=""; positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--force) force=true ;;
+    --copy)     shift; copy_files="$1" ;;
     -*)         echo "Unknown option: $1"; usage; exit 1 ;;
     *)          positional+=("$1") ;;
   esac; shift
@@ -442,7 +463,7 @@ arg="${positional[0]:-}"; arg2="${positional[1]:-}"
 case "$cmd" in
   list|ls)                 list_worktrees ;;
   du)                      disk_usage ;;
-  create|new)              create_or_checkout "create" "$arg" "$force" ;;
+  create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" ;;
   checkout|co)             cmd_checkout "$arg" ;;
   switch|sw)               cmd_switch "$arg" ;;
   tag|label)               cmd_tag "$arg" "$arg2" ;;

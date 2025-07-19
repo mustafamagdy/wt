@@ -1,4 +1,4 @@
-# Worktree Manager (`wt`)
+# Git Worktree Manager (`wt`)
 
 🚀 A powerful, cross-platform Git worktree management tool with intelligent partial matching and tagging.
 
@@ -14,7 +14,7 @@
 ## Installation
 
 ```bash
-npm install -g worktree-manager
+npm install -g git-wt
 ```
 
 ## Quick Start

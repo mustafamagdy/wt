@@ -1,5 +1,5 @@
 {
-  "name": "worktree-manager",
+  "name": "git-wt",
   "version": "1.0.0",
   "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
   "main": "bin/wt",
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "bash bin/wt help",
-    "postinstall": "echo '\n✅ worktree-manager installed! Run \"wt help\" to get started.\n'"
+    "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'"
   },
   "keywords": [
     "git",

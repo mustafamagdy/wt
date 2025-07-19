@@ -69,6 +69,7 @@ ADVANCED COMMANDS
 OPTIONS
   -f, --force                      Force operations (overwrite/remove)
   --copy <files>                   Copy files to worktree (create command only)
+  --dry-run                        Show what would be deleted without doing it
   -h, --help                       Show this help
 
 EXAMPLES
@@ -77,6 +78,7 @@ EXAMPLES
     wt create api --copy .env,.env.local        # Create + copy config files
     wt sw feat                                  # Switch to worktree matching "feat"
     wt sync feat                                # Sync feature branch with origin/main
+    wt delete test --dry-run                    # Preview what would be deleted
     wt delete test                              # Interactive delete for "test" matches
 
   Organization:
@@ -243,8 +245,8 @@ commit_and_push() {
   git push -u origin "$current_branch"
 }
 
-delete_worktree() {    # $1=partial_branch $2=force
-  local partial="$1" force="$2" matches=() branch folder target
+delete_worktree() {    # $1=partial_branch $2=force $3=dry_run
+  local partial="$1" force="$2" dry_run="$3" matches=() branch folder target
   
   while IFS= read -r line; do
     [[ -n "$line" ]] && matches+=("$line")
@@ -278,9 +280,50 @@ delete_worktree() {    # $1=partial_branch $2=force
   folder=$(folder_from_branch "$branch")
   target="$WORKTREES_DIR/$folder"
   [[ -d "$target" ]] || { echo "✖ Worktree not found: $target"; exit 1; }
-  git -C "$(git -C "$target" rev-parse --show-toplevel)" worktree remove ${force:+--force} "$target" || {
-    echo "✖ Failed to remove worktree (dirty? use --force)"; exit 1; }
-  rm -rf "$target" && echo "✓ Worktree deleted: $target"
+  
+  if [[ "$dry_run" == true ]]; then
+    echo "🔍 DRY RUN MODE - Would delete the following:"
+    echo "  📂 Worktree directory: $target"
+    echo "  🌿 Branch: $branch"
+    
+    # Check if worktree has uncommitted changes (including untracked files)
+    local has_changes=false
+    if ! git -C "$target" diff --quiet || ! git -C "$target" diff --cached --quiet; then
+      has_changes=true
+    fi
+    # Check for untracked files
+    if [[ -n $(git -C "$target" ls-files --others --exclude-standard) ]]; then
+      has_changes=true
+    fi
+    if [[ "$has_changes" == true ]]; then
+      echo "  ⚠️  WARNING: Worktree has uncommitted changes that would be lost"
+    fi
+    
+    # Check if branch has unpushed commits
+    local upstream=$(git -C "$target" rev-parse --abbrev-ref @{u} 2>/dev/null || echo "")
+    if [[ -n "$upstream" ]]; then
+      local ahead=$(git -C "$target" rev-list --count "$upstream..HEAD" 2>/dev/null || echo "0")
+      if [[ "$ahead" -gt 0 ]]; then
+        echo "  ⚠️  WARNING: Branch has $ahead unpushed commit(s) that would be lost"
+      fi
+    else
+      echo "  ⚠️  WARNING: Branch has no upstream - all commits would be lost"
+    fi
+    
+    # Show disk space that would be freed
+    if command -v du >/dev/null 2>&1; then
+      local size=$(du -sh "$target" 2>/dev/null | cut -f1 || echo "unknown")
+      echo "  💾 Disk space to be freed: $size"
+    fi
+    
+    echo
+    echo "💡 To actually delete, run: wt delete $partial"
+    [[ "$force" == true ]] && echo "💡 Force flag detected - would override safety checks"
+  else
+    git -C "$(git -C "$target" rev-parse --show-toplevel)" worktree remove ${force:+--force} "$target" || {
+      echo "✖ Failed to remove worktree (dirty? use --force)"; exit 1; }
+    rm -rf "$target" && echo "✓ Worktree deleted: $target"
+  fi
 }
 
 create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_files
@@ -564,11 +607,12 @@ cmd_sync() { # $1=partial_branch
 # ---------- argument parsing ------------------------------------------------
 [[ $# -eq 0 ]] && { usage; exit 1; }
 cmd="${1}"; shift
-force=false; copy_files=""; positional=()
+force=false; copy_files=""; dry_run=false; positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--force) force=true ;;
     --copy)     shift; copy_files="$1" ;;
+    --dry-run)  dry_run=true ;;
     -*)         echo "Unknown option: $1"; usage; exit 1 ;;
     *)          positional+=("$1") ;;
   esac; shift
@@ -586,7 +630,7 @@ case "$cmd" in
   tag|label)               cmd_tag "$arg" "$arg2" ;;
   switchg|sg)              cmd_switchg "$arg" ;;
   time|tm)                 cmd_time "$arg" ;;
-  delete|remove|rm)        delete_worktree "$arg" "$force" ;;
+  delete|remove|rm)        delete_worktree "$arg" "$force" "$dry_run" ;;
   push)                    commit_and_push ;;
   help|-h|--help)          usage ;;
   *)                       echo "Unknown command: $cmd"; usage; exit 1 ;;

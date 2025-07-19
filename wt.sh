@@ -38,43 +38,53 @@ fi
 # ---------- usage -----------------------------------------------------------
 usage() {
   cat <<EOF
-Usage: wt <command> [options]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Git Worktree Manager (wt)                         │
+│               Cross-platform tool with smart matching & tagging            │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-Git worktree management tool (cross-platform: macOS, Linux, Windows)
+USAGE
+  wt <command> [options]
 
-Core commands:
-  list | ls                        List all worktrees with status
-  create | new <branch> [--copy <files>]  Create new branch + worktree (optionally copy files)
-  checkout | co <branch>           Checkout existing branch in worktree
-  switch | sw <partial>            Switch to worktree by partial branch name
-  delete | rm <partial>            Delete worktree (supports partial matching)
+CORE COMMANDS
+  list, ls                         📋 List all worktrees with status
+  create, new <branch>             🔨 Create new branch + worktree
+    └─ --copy <files>              📄 Copy comma-separated files from main dir
+  checkout, co <branch>            ↗️  Checkout existing branch in worktree  
+  switch, sw <partial>             🔄 Switch to worktree by partial branch name
+  delete, rm <partial>             🗑️  Delete worktree (supports partial matching)
 
-Workflow commands:
-  push                             Commit all changes & push current worktree
-  du                               Show disk usage per worktree (with total)
+WORKFLOW COMMANDS  
+  push                             📤 Commit all changes & push current worktree
+  du                               💾 Show disk usage per worktree (with total)
 
-Organization commands:
-  tag <partial> <tag>              Tag a worktree with group label
-  switchg | sg <tag>               Switch to worktree by tag
+ORGANIZATION COMMANDS
+  tag <partial> <tag>              🏷️  Tag a worktree with group label
+  switchg, sg <tag>                🔍 Switch to worktree by tag
 
-Advanced commands:
-  time | tm <branch>@<YYYY-MM-DD>  Create detached worktree from specific date
+ADVANCED COMMANDS
+  time, tm <branch>@<YYYY-MM-DD>   ⏰ Create detached worktree from specific date
 
-Options:
+OPTIONS
   -f, --force                      Force operations (overwrite/remove)
-  --copy <files>                   Copy comma-separated files from main dir to worktree
-  -h, --help | help               Show this help
+  --copy <files>                   Copy files to worktree (create command only)
+  -h, --help                       Show this help
 
-Examples:
-  wt create feature/new-ui         # Create new branch + worktree
-  wt create feature/api --copy .env,.env.local  # Create worktree & copy config files
-  wt sw feat                       # Switch to worktree matching "feat"
-  wt delete test                   # Interactive delete for "test" matches
-  wt tag feat ui                   # Tag feature branch as "ui" group
-  wt sg ui                         # Switch to any worktree tagged "ui"
-  wt time main@2024-01-01          # Time machine to main branch on Jan 1st
+EXAMPLES
+  Basic Usage:
+    wt create feature/new-ui                    # Create new branch + worktree
+    wt create api --copy .env,.env.local        # Create + copy config files
+    wt sw feat                                  # Switch to worktree matching "feat"
+    wt delete test                              # Interactive delete for "test" matches
 
-Note: All commands support partial matching with interactive selection.
+  Organization:
+    wt tag feat ui                              # Tag feature branch as "ui" group  
+    wt sg ui                                    # Switch to any worktree tagged "ui"
+
+  Time Machine:
+    wt time main@2024-01-01                     # Worktree from main on Jan 1st
+
+💡 TIP: All commands support partial matching with interactive selection
 EOF
 }
 

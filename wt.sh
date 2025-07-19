@@ -56,6 +56,7 @@ CORE COMMANDS
 
 WORKFLOW COMMANDS  
   push                             📤 Commit all changes & push current worktree
+  sync <partial>                   🔄 Sync worktree with origin/main (auto stash/unstash)
   du                               💾 Show disk usage per worktree (with total)
 
 ORGANIZATION COMMANDS
@@ -75,6 +76,7 @@ EXAMPLES
     wt create feature/new-ui                    # Create new branch + worktree
     wt create api --copy .env,.env.local        # Create + copy config files
     wt sw feat                                  # Switch to worktree matching "feat"
+    wt sync feat                                # Sync feature branch with origin/main
     wt delete test                              # Interactive delete for "test" matches
 
   Organization:
@@ -190,18 +192,17 @@ resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or
 
 # ---------- core features (existing) ----------------------------------------
 list_worktrees() {
-  printf "\n%-20s %-25s %-25s %-3s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "D*" "PATH"
-  printf '%0.1s' "-"{1..105}; echo
+  printf "\n%-20s %-25s %-25s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "PATH"
+  printf '%0.1s' "-"{1..100}; echo
   [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
   for wt_dir in "$WORKTREES_DIR"/*; do
     [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
     branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
     upstream=$(git -C "$wt_dir" rev-parse --abbrev-ref @{u} 2>/dev/null || echo "-")
-    dirty=" "
     git -C "$wt_dir" diff --quiet && git -C "$wt_dir" diff --cached --quiet || branch="* ${branch}"
     origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
     proj_name=$( [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
-    printf "%-20s %-25s %-25s %-3s %s\n" "$proj_name" "$branch" "$upstream" "$dirty" "$wt_dir"
+    printf "%-20s %-25s %-25s %s\n" "$proj_name" "$branch" "$upstream" "$wt_dir"
   done
 }
 
@@ -455,6 +456,111 @@ cmd_switch() { # $1=partial
   esac
 }
 
+cmd_sync() { # $1=partial_branch
+  [[ -n "$1" ]] || { echo "✖ Branch name required"; exit 1; }
+  local matches=() branch wt_dir target_branch
+  
+  # Find matching worktree
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && matches+=("$line")
+  done < <(find_matching_worktrees "$1")
+  
+  case ${#matches[@]} in
+    0) echo "✖ No worktree found matching '$1'"; exit 1 ;;
+    1) 
+      wt_dir="${matches[0]}"
+      branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+      ;;
+    *) 
+      echo "Multiple worktrees match '$1':"
+      local branches=()
+      for dir in "${matches[@]}"; do
+        local br=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$dir")")
+        branches+=("$br")
+        echo "  $br ($dir)"
+      done
+      echo
+      echo "Select branch:"
+      PS3="Select option (1-${#branches[@]}): "
+      COLUMNS=1
+      select branch in "${branches[@]}"; do
+        [[ -n "$branch" ]] && break
+        echo "Invalid selection. Please choose 1-${#branches[@]}."
+      done
+      # Find the corresponding worktree directory
+      for i in "${!branches[@]}"; do
+        if [[ "${branches[$i]}" == "$branch" ]]; then
+          wt_dir="${matches[$i]}"
+          break
+        fi
+      done
+      ;;
+  esac
+  
+  echo "🔄 Syncing worktree: $branch"
+  
+  # Check if we're in a git repository
+  if ! git -C "$wt_dir" rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "✖ Not a git repository: $wt_dir"
+    exit 1
+  fi
+  
+  # Check if origin/main or origin/master exists
+  target_branch=""
+  if git -C "$wt_dir" show-ref --verify --quiet "refs/remotes/origin/main"; then
+    target_branch="origin/main"
+  elif git -C "$wt_dir" show-ref --verify --quiet "refs/remotes/origin/master"; then
+    target_branch="origin/master"
+  else
+    echo "✖ Neither origin/main nor origin/master found"
+    exit 1
+  fi
+  
+  # Fetch latest changes
+  echo "📡 Fetching latest changes..."
+  git -C "$wt_dir" fetch origin || { echo "✖ Failed to fetch from origin"; exit 1; }
+  
+  # Check if there are uncommitted changes
+  local has_changes=false
+  if ! git -C "$wt_dir" diff --quiet || ! git -C "$wt_dir" diff --cached --quiet; then
+    has_changes=true
+    echo "💾 Stashing uncommitted changes..."
+    git -C "$wt_dir" stash push -m "wt sync auto-stash $(date +%Y-%m-%d_%H:%M:%S)" || {
+      echo "✖ Failed to stash changes"; exit 1; }
+  fi
+  
+  # Perform rebase
+  echo "🔄 Rebasing $branch onto $target_branch..."
+  if git -C "$wt_dir" rebase "$target_branch"; then
+    echo "✅ Rebase successful"
+  else
+    echo "⚠️  Rebase failed, attempting merge instead..."
+    git -C "$wt_dir" rebase --abort 2>/dev/null || true
+    if git -C "$wt_dir" merge "$target_branch"; then
+      echo "✅ Merge successful"
+    else
+      echo "✖ Both rebase and merge failed. Please resolve conflicts manually."
+      if [[ "$has_changes" == true ]]; then
+        echo "💡 Your changes are stashed. Use 'git stash pop' to restore them."
+      fi
+      exit 1
+    fi
+  fi
+  
+  # Restore stashed changes if any
+  if [[ "$has_changes" == true ]]; then
+    echo "📤 Restoring stashed changes..."
+    if git -C "$wt_dir" stash pop; then
+      echo "✅ Changes restored successfully"
+    else
+      echo "⚠️  Failed to restore stashed changes. Use 'git stash pop' manually."
+      echo "💡 Your changes are still available in the stash."
+    fi
+  fi
+  
+  echo "🎉 Sync completed for $branch"
+}
+
 # ---------- argument parsing ------------------------------------------------
 [[ $# -eq 0 ]] && { usage; exit 1; }
 cmd="${1}"; shift
@@ -476,6 +582,7 @@ case "$cmd" in
   create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" ;;
   checkout|co)             cmd_checkout "$arg" ;;
   switch|sw)               cmd_switch "$arg" ;;
+  sync)                    cmd_sync "$arg" ;;
   tag|label)               cmd_tag "$arg" "$arg2" ;;
   switchg|sg)              cmd_switchg "$arg" ;;
   time|tm)                 cmd_time "$arg" ;;

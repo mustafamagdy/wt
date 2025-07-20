@@ -354,18 +354,30 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_fi
   
   # Copy specified files if --copy parameter was provided
   if [[ -n "$copy_files" && "$mode" == "create" ]]; then
-    IFS=',' read -ra FILES <<< "$copy_files"
-    for file in "${FILES[@]}"; do
-      file=$(echo "$file" | xargs)  # trim whitespace
-      if [[ -f "$proj_root/$file" ]]; then
-        cp "$proj_root/$file" "$target/$file"
-        echo "✓ Copied $file to worktree"
-      elif [[ -e "$proj_root/$file" ]]; then
-        cp -r "$proj_root/$file" "$target/$file"
-        echo "✓ Copied $file to worktree"
-      else
-        echo "⚠ File not found: $file (skipped)"
-      fi
+    IFS=',' read -ra PATTERNS <<< "$copy_files"
+    for pattern in "${PATTERNS[@]}"; do
+      pattern=$(echo "$pattern" | xargs)  # trim whitespace
+      
+      # Change to project root to expand globs correctly
+      (cd "$proj_root" && shopt -s nullglob && 
+       matches=($pattern)
+       if [[ ${#matches[@]} -eq 0 ]]; then
+         echo "⚠ No files found matching pattern: $pattern (skipped)"
+       else
+         for file in "${matches[@]}"; do
+           # Create directory structure if needed
+           target_dir="$target/$(dirname "$file")"
+           [[ "$target_dir" != "$target/." ]] && mkdir -p "$target_dir"
+           
+           if [[ -f "$file" ]]; then
+             cp "$file" "$target/$file"
+             echo "✓ Copied $file to worktree"
+           elif [[ -d "$file" ]]; then
+             cp -r "$file" "$target/$file"
+             echo "✓ Copied directory $file to worktree"
+           fi
+         done
+       fi)
     done
   fi
   
@@ -611,7 +623,18 @@ force=false; copy_files=""; dry_run=false; positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--force) force=true ;;
-    --copy)     shift; copy_files="$1" ;;
+    --copy)     shift
+                # Collect all arguments until next flag or end
+                copy_files=""
+                while [[ $# -gt 0 && ! "$1" =~ ^- ]]; do
+                  if [[ -n "$copy_files" ]]; then
+                    copy_files="$copy_files,$1"
+                  else
+                    copy_files="$1"
+                  fi
+                  shift
+                done
+                continue ;;
     --dry-run)  dry_run=true ;;
     -*)         echo "Unknown option: $1"; usage; exit 1 ;;
     *)          positional+=("$1") ;;

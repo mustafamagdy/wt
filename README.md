@@ -26,16 +26,23 @@ npm install -g git-wt
 # List all worktrees
 wt list
 
+# List worktrees matching pattern
+wt list sms
+
 # Create new branch + worktree
 wt create feature/new-ui
 
 # Create with config files copied
 wt create feature/api --copy .env,.env.local
 
+# Create with all claude files/directories copied
+wt create test --copy "claude*"
+
 # Switch to worktree (partial matching)
 wt sw feat
 
-# Sync with latest changes
+# Sync with latest changes (auto-detects current branch if no argument)
+wt sync
 wt sync feat
 
 # Preview deletion (dry-run)
@@ -54,15 +61,15 @@ wt sg ui
 ## Commands
 
 ### Core Commands
-- `wt list | ls` - List all worktrees with status
-- `wt create | new <branch> [--copy <files>]` - Create new branch + worktree (optionally copy files)
+- `wt list | ls | l [pattern]` - List all worktrees with status (optional pattern filter)
+- `wt create | new <branch> [--copy <patterns>]` - Create new branch + worktree (optionally copy files/dirs)
 - `wt checkout | co <branch>` - Checkout existing branch in worktree
 - `wt switch | sw <partial>` - Switch to worktree by partial branch name
 - `wt delete | rm <partial> [--dry-run]` - Delete worktree (supports partial matching & dry-run)
 
 ### Workflow Commands
-- `wt push` - Commit all changes & push current worktree
-- `wt sync <partial>` - Sync worktree with origin/main (auto stash/unstash)
+- `wt push` - Commit all changes & push current worktree (creates origin if missing)
+- `wt sync [partial]` - Sync worktree with origin/main (auto stash/unstash, auto-detects current branch)
 - `wt du` - Show disk usage per worktree (with total)
 
 ### Organization Commands
@@ -95,7 +102,7 @@ wt delete old-feature --dry-run
 wt delete old-feature
 ```
 
-### File Copying
+### File Copying with Patterns
 ```bash
 # Copy single file when creating worktree
 wt create feature/api --copy .env
@@ -105,16 +112,26 @@ wt create feature/ui --copy .env,.env.local,config.json
 
 # Copy entire directories
 wt create feature/docs --copy docs/
+
+# Copy with glob patterns (use quotes to prevent shell expansion)
+wt create test --copy "claude*"           # Copies claude.md, .claude/, claude-config.json
+wt create api --copy ".env*"              # Copies .env, .env.local, .env.production
+wt create setup --copy "config/,*.md"    # Copies config directory and all markdown files
 ```
 
 ### Sync Operations
 ```bash
-# Sync current feature with latest main
+# Auto-detect current branch and sync
+wt sync
+
+# Sync specific branch with latest main
 wt sync feature-branch
 
 # Automatically handles:
+# - Auto-detection of current branch (if no argument provided)
+# - Fallback to local main/master if remote not available
 # - Stashing uncommitted changes
-# - Fetching latest origin/main
+# - Fetching latest origin/main (if remote exists)
 # - Rebasing (or merging if rebase fails)
 # - Restoring stashed changes
 ```
@@ -149,6 +166,18 @@ wt time main@2024-01-01
 wt time develop@2024-06-15
 ```
 
+### Pattern Filtering
+```bash
+# List only worktrees matching "sms" 
+wt list sms
+wt l api      # Short alias
+wt ls test    # Alternative alias
+
+# Pattern matches branch names, project names, and paths
+wt list feature    # Shows all feature branches
+wt list ui         # Shows UI-related worktrees
+```
+
 ## Configuration
 
 Worktrees are stored in `~/.worktrees/` by default. On Windows, uses `%USERPROFILE%/.worktrees/`.
@@ -179,7 +208,7 @@ Each folder contains a complete working directory for that branch. Branch names 
 ## Options
 
 - `-f, --force` - Force operations (overwrite/remove)
-- `--copy <files>` - Copy comma-separated files from main dir to worktree (create only)
+- `--copy <patterns>` - Copy files/directories matching patterns to worktree (create only)
 - `--dry-run` - Show what would be deleted without doing it (delete only)
 - `-h, --help` - Show help
 
@@ -227,6 +256,19 @@ Select option (1-3):
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### v1.0.2
+- ✨ **NEW**: `wt l` alias for list command - Quick listing with `wt l`
+- ✨ **NEW**: Pattern filtering for list command - `wt list <pattern>` to filter results
+- ✨ **NEW**: Auto-detection for sync command - `wt sync` without arguments detects current branch
+- ✨ **NEW**: Enhanced copy patterns - Support for glob patterns like `"claude*"` to copy files and directories
+- ✨ **NEW**: Smart origin creation for push - Automatically creates GitHub remote when missing
+- 🔧 **ENHANCED**: Improved sync fallback - Uses local main/master when remote branches not available
+- 🔧 **ENHANCED**: Better glob pattern support - Hidden files, directories, and symlinks
+- 🔧 **ENHANCED**: Rsync integration for directory copying (when available)
+- 🐛 **FIXED**: Unbound variable error in find_matching_worktrees function
+- 🐛 **FIXED**: Git directory exclusion during file copying operations
+- 🔒 **SECURITY**: Automatic .git directory exclusion in copy operations
 
 ### v1.0.1
 - ✨ **NEW**: `wt sync` command - Smart sync with origin/main using rebase/merge

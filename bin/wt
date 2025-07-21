@@ -3,7 +3,7 @@
 # wt – Git worktree manager (refactored)
 # ----------------------------------------------------------
 # Commands (run `wt help` for full details)
-#   wt list | ls                    List worktrees
+#   wt list | ls | l                List worktrees
 #   wt create | new <branch>        New branch + worktree
 #   wt checkout | co <branch>       Checkout existing branch in worktree
 #   wt switch  | sw <partial>       Switch to worktree by partial branch
@@ -47,16 +47,16 @@ USAGE
   wt <command> [options]
 
 CORE COMMANDS
-  list, ls                         📋 List all worktrees with status
+  list, ls, l [pattern]            📋 List all worktrees with status (optional pattern filter)
   create, new <branch>             🔨 Create new branch + worktree
-    └─ --copy <files>              📄 Copy comma-separated files from main dir
+    └─ --copy <patterns>           📄 Copy files/directories matching patterns (supports globs)
   checkout, co <branch>            ↗️  Checkout existing branch in worktree  
   switch, sw <partial>             🔄 Switch to worktree by partial branch name
   delete, rm <partial>             🗑️  Delete worktree (supports partial matching)
 
 WORKFLOW COMMANDS  
-  push                             📤 Commit all changes & push current worktree
-  sync <partial>                   🔄 Sync worktree with origin/main (auto stash/unstash)
+  push                             📤 Commit all changes & push current worktree (creates origin if missing)
+  sync [partial]                   🔄 Sync worktree with origin/main (auto stash/unstash, auto-detects current branch)
   du                               💾 Show disk usage per worktree (with total)
 
 ORGANIZATION COMMANDS
@@ -68,14 +68,16 @@ ADVANCED COMMANDS
 
 OPTIONS
   -f, --force                      Force operations (overwrite/remove)
-  --copy <files>                   Copy files to worktree (create command only)
+  --copy <patterns>                Copy files/dirs matching patterns (create command only)
   --dry-run                        Show what would be deleted without doing it
   -h, --help                       Show this help
 
 EXAMPLES
   Basic Usage:
+    wt list sms                                 # List worktrees matching "sms" pattern
     wt create feature/new-ui                    # Create new branch + worktree
     wt create api --copy .env,.env.local        # Create + copy config files
+    wt create test --copy claude*               # Create + copy all claude files/dirs
     wt sw feat                                  # Switch to worktree matching "feat"
     wt sync feat                                # Sync feature branch with origin/main
     wt delete test --dry-run                    # Preview what would be deleted
@@ -157,7 +159,8 @@ find_matching_worktrees() { # $1=partial_branch_name → array of matching workt
     branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
     [[ "$branch" == *"$partial"* ]] && matches+=("$wt_dir")
   done
-  printf '%s\n' "${matches[@]}"
+  # Handle empty array safely
+  [[ ${#matches[@]} -gt 0 ]] && printf '%s\n' "${matches[@]}"
 }
 
 resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or exits
@@ -193,19 +196,40 @@ resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or
 }
 
 # ---------- core features (existing) ----------------------------------------
-list_worktrees() {
+list_worktrees() { # $1=optional_pattern
+  local pattern="$1"
   printf "\n%-20s %-25s %-25s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "PATH"
   printf '%0.1s' "-"{1..100}; echo
   [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
+  
+  local found_matches=false
   for wt_dir in "$WORKTREES_DIR"/*; do
     [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
     branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+    
+    # Apply pattern filter if provided
+    if [[ -n "$pattern" ]]; then
+      # Check if pattern matches branch name, project name, or path
+      if [[ "$branch" != *"$pattern"* ]]; then
+        origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
+        proj_name=$( [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
+        if [[ "$proj_name" != *"$pattern"* && "$wt_dir" != *"$pattern"* ]]; then
+          continue
+        fi
+      fi
+    fi
+    
+    found_matches=true
     upstream=$(git -C "$wt_dir" rev-parse --abbrev-ref @{u} 2>/dev/null || echo "-")
     git -C "$wt_dir" diff --quiet && git -C "$wt_dir" diff --cached --quiet || branch="* ${branch}"
     origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
     proj_name=$( [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
     printf "%-20s %-25s %-25s %s\n" "$proj_name" "$branch" "$upstream" "$wt_dir"
   done
+  
+  if [[ -n "$pattern" && "$found_matches" == false ]]; then
+    echo "No worktrees found matching pattern: '$pattern'"
+  fi
 }
 
 disk_usage() {
@@ -242,7 +266,50 @@ commit_and_push() {
     git add -A && git commit -m "$msg"
   fi
   current_branch=$(git rev-parse --abbrev-ref HEAD)
-  git push -u origin "$current_branch"
+  
+  # Check if origin remote exists
+  if ! git remote get-url origin >/dev/null 2>&1; then
+    echo "⚠️  No 'origin' remote found. Would you like to create one?"
+    
+    # Try to detect GitHub repository name from current directory
+    local repo_name
+    repo_name=$(basename "$(git rev-parse --show-toplevel)" 2>/dev/null || basename "$PWD")
+    
+    # Get GitHub username if available
+    local github_user
+    github_user=$(git config --get github.user 2>/dev/null || git config --get user.name 2>/dev/null || echo "USERNAME")
+    
+    local suggested_url="https://github.com/${github_user}/${repo_name}.git"
+    echo "Suggested repository URL: $suggested_url"
+    
+    read -r -p "Enter GitHub repository URL (or press Enter to use suggestion): " repo_url
+    [[ -z "$repo_url" ]] && repo_url="$suggested_url"
+    
+    echo "🔗 Adding origin remote: $repo_url"
+    git remote add origin "$repo_url"
+    
+    # Ask if user wants to create the repository on GitHub
+    read -p "Create repository on GitHub? (requires gh CLI) (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+      if command -v gh >/dev/null 2>&1; then
+        echo "🏗️  Creating GitHub repository..."
+        gh repo create "$repo_name" --public --source=. --remote=origin --push || {
+          echo "⚠️  Failed to create repository via GitHub CLI. You may need to create it manually."
+        }
+        return
+      else
+        echo "⚠️  GitHub CLI (gh) not found. Please install it or create the repository manually."
+        echo "💡 Install with: brew install gh (macOS) or visit https://cli.github.com"
+      fi
+    fi
+  fi
+  
+  git push -u origin "$current_branch" || {
+    echo "✖ Push failed. You may need to create the repository on GitHub first."
+    echo "💡 Run 'gh repo create $repo_name --public' if you have GitHub CLI installed"
+    exit 1
+  }
 }
 
 delete_worktree() {    # $1=partial_branch $2=force $3=dry_run
@@ -359,25 +426,46 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_fi
       pattern=$(echo "$pattern" | xargs)  # trim whitespace
       
       # Change to project root to expand globs correctly
-      (cd "$proj_root" && shopt -s nullglob && 
+      (cd "$proj_root" && 
+       # Enable glob options for hidden files and recursive matching
+       shopt -s nullglob dotglob extglob
+       
        matches=($pattern)
        if [[ ${#matches[@]} -eq 0 ]]; then
-         echo "⚠ No files found matching pattern: $pattern (skipped)"
+         echo "⚠️  No files found matching pattern: $pattern (skipped)"
        else
+         echo "📁 Copying ${#matches[@]} item(s) matching '$pattern':"
          for file in "${matches[@]}"; do
+           # Skip .git directories and other problematic paths
+           if [[ "$file" == ".git" || "$file" == ".git/"* || "$file" == *"/.git" || "$file" == *"/.git/"* ]]; then
+             echo "   ⚠️  Skipping .git directory: $file"
+             continue
+           fi
+           
            # Create directory structure if needed
            target_dir="$target/$(dirname "$file")"
            [[ "$target_dir" != "$target/." ]] && mkdir -p "$target_dir"
            
            if [[ -f "$file" ]]; then
-             cp "$file" "$target/$file"
-             echo "✓ Copied $file to worktree"
+             cp "$file" "$target/$file" && echo "   ✓ Copied file: $file"
            elif [[ -d "$file" ]]; then
-             cp -r "$file" "$target/$file"
-             echo "✓ Copied directory $file to worktree"
+             # Use rsync if available for better directory copying, fall back to cp
+             if command -v rsync >/dev/null 2>&1; then
+               rsync -a --exclude='.git' "$file/" "$target/$file/" && echo "   ✓ Copied directory: $file"
+             else
+               cp -r "$file" "$target/$file" && echo "   ✓ Copied directory: $file"
+             fi
+           elif [[ -L "$file" ]]; then
+             cp -P "$file" "$target/$file" && echo "   ✓ Copied symlink: $file"
+           else
+             echo "   ⚠️  Unknown file type, skipping: $file"
            fi
          done
-       fi)
+       fi
+       
+       # Reset glob options
+       shopt -u nullglob dotglob extglob
+      )
     done
   fi
   
@@ -511,9 +599,28 @@ cmd_switch() { # $1=partial
   esac
 }
 
-cmd_sync() { # $1=partial_branch
-  [[ -n "$1" ]] || { echo "✖ Branch name required"; exit 1; }
-  local matches=() branch wt_dir target_branch
+cmd_sync() { # $1=partial_branch (optional)
+  local matches=() branch wt_dir target_branch partial="$1"
+  
+  # If no branch provided, try to detect current branch
+  if [[ -z "$partial" ]]; then
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then
+      current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+      if [[ -n "$current_branch" && "$current_branch" != "HEAD" ]]; then
+        read -p "Sync current branch '$current_branch'? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+          partial="$current_branch"
+        else
+          echo "✖ Branch name required"; exit 1
+        fi
+      else
+        echo "✖ Branch name required"; exit 1
+      fi
+    else
+      echo "✖ Branch name required"; exit 1
+    fi
+  fi
   
   # Find matching worktree
   while IFS= read -r line; do
@@ -560,20 +667,32 @@ cmd_sync() { # $1=partial_branch
     exit 1
   fi
   
-  # Check if origin/main or origin/master exists
+  # Check if origin/main or origin/master exists, fall back to local main/master
   target_branch=""
   if git -C "$wt_dir" show-ref --verify --quiet "refs/remotes/origin/main"; then
     target_branch="origin/main"
   elif git -C "$wt_dir" show-ref --verify --quiet "refs/remotes/origin/master"; then
     target_branch="origin/master"
+  elif git -C "$wt_dir" show-ref --verify --quiet "refs/heads/main"; then
+    echo "⚠️  No origin/main or origin/master found, using local main branch"
+    target_branch="main"
+  elif git -C "$wt_dir" show-ref --verify --quiet "refs/heads/master"; then
+    echo "⚠️  No origin/main or origin/master found, using local master branch"
+    target_branch="master"
   else
-    echo "✖ Neither origin/main nor origin/master found"
+    echo "✖ No main/master branch found (neither remote nor local)"
+    echo "💡 Available branches:"
+    git -C "$wt_dir" branch -a | head -10
     exit 1
   fi
   
-  # Fetch latest changes
-  echo "📡 Fetching latest changes..."
-  git -C "$wt_dir" fetch origin || { echo "✖ Failed to fetch from origin"; exit 1; }
+  # Fetch latest changes (only if using remote branch)
+  if [[ "$target_branch" == origin/* ]]; then
+    echo "📡 Fetching latest changes..."
+    git -C "$wt_dir" fetch origin || { echo "✖ Failed to fetch from origin"; exit 1; }
+  else
+    echo "💡 Using local branch, skipping fetch"
+  fi
   
   # Check if there are uncommitted changes
   local has_changes=false
@@ -644,7 +763,7 @@ arg="${positional[0]:-}"; arg2="${positional[1]:-}"
 
 # ---------- command dispatch -----------------------------------------------
 case "$cmd" in
-  list|ls)                 list_worktrees ;;
+  list|ls|l)               list_worktrees "$arg" ;;
   du)                      disk_usage ;;
   create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" ;;
   checkout|co)             cmd_checkout "$arg" ;;

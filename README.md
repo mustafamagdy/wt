@@ -29,6 +29,9 @@ wt list
 # List worktrees matching pattern
 wt list sms
 
+# List only worktrees for current repository
+wt list --current
+
 # Create new branch + worktree
 wt create feature/new-ui
 
@@ -61,7 +64,7 @@ wt sg ui
 ## Commands
 
 ### Core Commands
-- `wt list | ls | l [pattern]` - List all worktrees with status (optional pattern filter)
+- `wt list | ls | l [pattern] [--current]` - List all worktrees with status (optional pattern filter, --current shows only current repo worktrees)
 - `wt create | new <branch> [--copy <patterns>]` - Create new branch + worktree (optionally copy files/dirs)
 - `wt checkout | co <branch>` - Checkout existing branch in worktree
 - `wt switch | sw <partial>` - Switch to worktree by partial branch name
@@ -173,6 +176,12 @@ wt list sms
 wt l api      # Short alias
 wt ls test    # Alternative alias
 
+# List only worktrees for current repository
+wt list --current
+
+# Combine current repo filter with pattern
+wt list --current feature
+
 # Pattern matches branch names, project names, and paths
 wt list feature    # Shows all feature branches
 wt list ui         # Shows UI-related worktrees
@@ -209,6 +218,7 @@ Each folder contains a complete working directory for that branch. Branch names 
 
 - `-f, --force` - Force operations (overwrite/remove)
 - `--copy <patterns>` - Copy files/directories matching patterns to worktree (create only)
+- `--current` - Show only worktrees for current repository (list only)
 - `--dry-run` - Show what would be deleted without doing it (delete only)
 - `-h, --help` - Show help
 
@@ -256,6 +266,11 @@ Select option (1-3):
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### v1.0.3
+- ✨ **NEW**: `--current` flag for list command - Filter worktrees to show only those from current repository
+- 🔧 **ENHANCED**: Better repository filtering - Uses origin URL to match worktrees from same repository
+- 📚 **DOCS**: Updated README with --current flag examples and usage
 
 ### v1.0.2
 - ✨ **NEW**: `wt l` alias for list command - Quick listing with `wt l`

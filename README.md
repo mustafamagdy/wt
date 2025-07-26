@@ -267,6 +267,11 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
+### v1.0.4
+- 🐛 **FIXED**: `--current` flag now properly implemented and functional
+- 🔧 **ENHANCED**: Improved argument parsing to handle `--current` flag correctly
+- 🔧 **ENHANCED**: Better repository matching logic for current repo filtering
+
 ### v1.0.3
 - ✨ **NEW**: `--current` flag for list command - Filter worktrees to show only those from current repository
 - 🔧 **ENHANCED**: Better repository filtering - Uses origin URL to match worktrees from same repository

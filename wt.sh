@@ -48,6 +48,7 @@ USAGE
 
 CORE COMMANDS
   list, ls, l [pattern]            📋 List all worktrees with status (optional pattern filter)
+    └─ --current                   🔍 Show only worktrees for current repository
   create, new <branch>             🔨 Create new branch + worktree
     └─ --copy <patterns>           📄 Copy files/directories matching patterns (supports globs)
   checkout, co <branch>            ↗️  Checkout existing branch in worktree  
@@ -69,12 +70,14 @@ ADVANCED COMMANDS
 OPTIONS
   -f, --force                      Force operations (overwrite/remove)
   --copy <patterns>                Copy files/dirs matching patterns (create command only)
+  --current                        Show only worktrees for current repository (list command only)
   --dry-run                        Show what would be deleted without doing it
   -h, --help                       Show this help
 
 EXAMPLES
   Basic Usage:
     wt list sms                                 # List worktrees matching "sms" pattern
+    wt list --current                           # List worktrees for current repository only
     wt create feature/new-ui                    # Create new branch + worktree
     wt create api --copy .env,.env.local        # Create + copy config files
     wt create test --copy claude*               # Create + copy all claude files/dirs
@@ -196,16 +199,43 @@ resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or
 }
 
 # ---------- core features (existing) ----------------------------------------
-list_worktrees() { # $1=optional_pattern
-  local pattern="$1"
+list_worktrees() { # $1=optional_pattern $2=current_only
+  local pattern="$1" current_only="$2"
   printf "\n%-20s %-25s %-25s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "PATH"
   printf '%0.1s' "-"{1..100}; echo
   [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
+  
+  # Get current repository info if --current flag is used
+  local current_repo_url=""
+  if [[ "$current_only" == true ]]; then
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then
+      current_repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+      if [[ -z "$current_repo_url" ]]; then
+        # Fallback to using the git toplevel directory name
+        current_repo_url=$(basename "$(git rev-parse --show-toplevel)" 2>/dev/null || echo "")
+      fi
+    else
+      echo "✖ Not inside a Git repository. --current flag requires being in a git repo."
+      return 1
+    fi
+  fi
   
   local found_matches=false
   for wt_dir in "$WORKTREES_DIR"/*; do
     [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
     branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
+    
+    # Apply --current filter if provided
+    if [[ "$current_only" == true ]]; then
+      wt_origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
+      wt_proj_name=$( [[ -n "$wt_origin_url" ]] && basename "${wt_origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
+      current_proj_name=$( [[ -n "$current_repo_url" ]] && basename "${current_repo_url%.git}" || "$current_repo_url" )
+      
+      # Skip if this worktree doesn't belong to the current repository
+      if [[ "$wt_origin_url" != "$current_repo_url" && "$wt_proj_name" != "$current_proj_name" ]]; then
+        continue
+      fi
+    fi
     
     # Apply pattern filter if provided
     if [[ -n "$pattern" ]]; then
@@ -229,6 +259,8 @@ list_worktrees() { # $1=optional_pattern
   
   if [[ -n "$pattern" && "$found_matches" == false ]]; then
     echo "No worktrees found matching pattern: '$pattern'"
+  elif [[ "$current_only" == true && "$found_matches" == false ]]; then
+    echo "No worktrees found for current repository"
   fi
 }
 
@@ -738,7 +770,7 @@ cmd_sync() { # $1=partial_branch (optional)
 # ---------- argument parsing ------------------------------------------------
 [[ $# -eq 0 ]] && { usage; exit 1; }
 cmd="${1}"; shift
-force=false; copy_files=""; dry_run=false; positional=()
+force=false; copy_files=""; dry_run=false; current_only=false; positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--force) force=true ;;
@@ -755,6 +787,7 @@ while [[ $# -gt 0 ]]; do
                 done
                 continue ;;
     --dry-run)  dry_run=true ;;
+    --current)  current_only=true ;;
     -*)         echo "Unknown option: $1"; usage; exit 1 ;;
     *)          positional+=("$1") ;;
   esac; shift
@@ -763,7 +796,7 @@ arg="${positional[0]:-}"; arg2="${positional[1]:-}"
 
 # ---------- command dispatch -----------------------------------------------
 case "$cmd" in
-  list|ls|l)               list_worktrees "$arg" ;;
+  list|ls|l)               list_worktrees "$arg" "$current_only" ;;
   du)                      disk_usage ;;
   create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" ;;
   checkout|co)             cmd_checkout "$arg" ;;

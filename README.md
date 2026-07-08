@@ -35,6 +35,10 @@ wt list --current
 # Create new branch + worktree
 wt create feature/new-ui
 
+# Create new branch from a specific base branch
+wt create feature/new-ui main
+wt create hotfix/urgent develop
+
 # Create with config files copied
 wt create feature/api --copy .env,.env.local
 
@@ -65,7 +69,7 @@ wt sg ui
 
 ### Core Commands
 - `wt list | ls | l [pattern] [--current]` - List all worktrees with status (optional pattern filter, --current shows only current repo worktrees)
-- `wt create | new <branch> [--copy <patterns>]` - Create new branch + worktree (optionally copy files/dirs)
+- `wt create | new <branch> [base] [--copy <patterns>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs)
 - `wt checkout | co <branch>` - Checkout existing branch in worktree
 - `wt switch | sw <partial>` - Switch to worktree by partial branch name
 - `wt delete | rm <partial> [--dry-run]` - Delete worktree (supports partial matching & dry-run)
@@ -86,7 +90,10 @@ wt sg ui
 
 ### Basic Workflow
 ```bash
-# Create feature branch with config files
+# Create feature branch from main
+wt create feature/user-auth main
+
+# Create with config files copied
 wt create feature/user-auth --copy .env,.env.local
 
 # Work on feature, sync with latest main
@@ -266,6 +273,10 @@ Select option (1-3):
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### v1.0.5
+- ✨ **NEW**: `wt create <branch> <base>` - Create new branch + worktree from a specific base branch (local or remote). Falls back to current HEAD when base is omitted.
+- 🔧 **ENHANCED**: Validates that the base branch exists locally or on origin before creating.
 
 ### v1.0.4
 - 🐛 **FIXED**: `--current` flag now properly implemented and functional

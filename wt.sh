@@ -5,6 +5,7 @@
 # Commands (run `wt help` for full details)
 #   wt list | ls | l                List worktrees
 #   wt create | new <branch>        New branch + worktree
+#   wt create | new <branch> <base> New branch + worktree from <base> branch
 #   wt checkout | co <branch>       Checkout existing branch in worktree
 #   wt switch  | sw <partial>       Switch to worktree by partial branch
 #   wt delete  | rm <branch>        Remove worktree folder
@@ -49,7 +50,7 @@ USAGE
 CORE COMMANDS
   list, ls, l [pattern]            📋 List all worktrees with status (optional pattern filter)
     └─ --current                   🔍 Show only worktrees for current repository
-  create, new <branch>             🔨 Create new branch + worktree
+  create, new <branch> [base]      🔨 Create new branch + worktree (optionally from <base> branch)
     └─ --copy <patterns>           📄 Copy files/directories matching patterns (supports globs)
   checkout, co <branch>            ↗️  Checkout existing branch in worktree  
   switch, sw <partial>             🔄 Switch to worktree by partial branch name
@@ -79,6 +80,7 @@ EXAMPLES
     wt list sms                                 # List worktrees matching "sms" pattern
     wt list --current                           # List worktrees for current repository only
     wt create feature/new-ui                    # Create new branch + worktree
+    wt create feature/new-ui main               # Create new branch from main
     wt create api --copy .env,.env.local        # Create + copy config files
     wt create test --copy claude*               # Create + copy all claude files/dirs
     wt sw feat                                  # Switch to worktree matching "feat"
@@ -425,8 +427,8 @@ delete_worktree() {    # $1=partial_branch $2=force $3=dry_run
   fi
 }
 
-create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_files
-  local mode="$1" branch="$2" force="$3" copy_files="$4" proj_root folder target
+create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_files $5=base_branch
+  local mode="$1" branch="$2" force="$3" copy_files="$4" base_branch="$5" proj_root folder target
   require_repo; ensure_dir
   proj_root=$(git rev-parse --show-toplevel)
   folder=$(folder_from_branch "$branch")
@@ -438,6 +440,20 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_fi
       echo "✖ Branch '$branch' already exists. Use 'wt checkout $branch' instead."
       exit 1
     fi
+    # Validate base branch if provided
+    if [[ -n "$base_branch" ]]; then
+      if ! git -C "$proj_root" show-ref --verify --quiet "refs/heads/$base_branch" \
+         && ! git -C "$proj_root" show-ref --verify --quiet "refs/remotes/origin/$base_branch"; then
+        echo "✖ Base branch '$base_branch' does not exist locally or remotely."
+        exit 1
+      fi
+      # Resolve to local ref if it exists (so we don't require a fetch), else use origin/
+      if git -C "$proj_root" show-ref --verify --quiet "refs/heads/$base_branch"; then
+        :
+      else
+        base_branch="origin/$base_branch"
+      fi
+    fi
   fi
   
   if [[ -e "$target" ]]; then
@@ -446,7 +462,12 @@ create_or_checkout() {  # $1=mode(create/checkout) $2=branch $3=force $4=copy_fi
   fi
   
   if [[ "$mode" == "create" ]]; then
-    git -C "$proj_root" worktree add -b "$branch" "$target"
+    if [[ -n "$base_branch" ]]; then
+      git -C "$proj_root" worktree add -b "$branch" "$target" "$base_branch"
+      echo "✓ Created branch '$branch' from '$base_branch'"
+    else
+      git -C "$proj_root" worktree add -b "$branch" "$target"
+    fi
   else
     git -C "$proj_root" worktree add "$target" "$branch"
   fi
@@ -798,7 +819,7 @@ arg="${positional[0]:-}"; arg2="${positional[1]:-}"
 case "$cmd" in
   list|ls|l)               list_worktrees "$arg" "$current_only" ;;
   du)                      disk_usage ;;
-  create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" ;;
+  create|new)              create_or_checkout "create" "$arg" "$force" "$copy_files" "$arg2" ;;
   checkout|co)             cmd_checkout "$arg" ;;
   switch|sw)               cmd_switch "$arg" ;;
   sync)                    cmd_sync "$arg" ;;

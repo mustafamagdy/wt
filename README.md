@@ -1,15 +1,16 @@
 # Git Worktree Manager (`wt`)
 
-🚀 A powerful, cross-platform Git worktree management tool with intelligent partial matching and tagging.
+🚀 A polished, cross-platform Git worktree CLI with intelligent matching, safe workflows, and interactive prompts.
 
 ## Features
 
-- ✅ **Cross-platform**: Works on macOS, Linux, and Windows (Git Bash/WSL)
+- ✅ **Cross-platform**: Native Node.js CLI for macOS, Linux, and Windows
+- 🎨 **Readable output**: TTY-aware colors, aligned tables, and `NO_COLOR` support
 - 🔍 **Smart matching**: Partial branch name matching with interactive selection
 - 🏷️ **Tagging system**: Organize worktrees with custom tags/groups
 - ⏰ **Time machine**: Create worktrees from specific dates
 - 📊 **Disk usage**: Monitor storage usage with totals
-- 🎯 **Interactive menus**: User-friendly selection for multiple matches
+- 🎯 **Interactive menus**: Keyboard-driven selection, confirmation, and cancellation
 - 🔄 **Smart sync**: Auto-sync with origin/main using rebase/merge with stash management
 - 📄 **File copying**: Copy configuration files when creating worktrees
 - 🔍 **Dry-run mode**: Preview deletions with safety warnings before executing
@@ -17,7 +18,7 @@
 ## Installation
 
 ```bash
-npm install -g git-wt
+bun add --global git-wt
 ```
 
 ## Quick Start
@@ -58,7 +59,7 @@ wt sync feat
 # Preview deletion (dry-run)
 wt delete test --dry-run
 
-# Delete worktree (with interactive selection)
+# Delete worktree (with interactive selection and confirmation)
 wt delete test
 
 # Tag worktree for organization
@@ -75,7 +76,7 @@ wt sg ui
 - `wt create | new <branch> [base] [--copy <patterns>] [-d <path>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs, optionally override worktree location)
 - `wt checkout | co <branch> [-d <path>]` - Checkout existing branch in worktree
 - `wt switch | sw <partial>` - Switch to worktree by partial branch name
-- `wt delete | rm <partial> [--dry-run]` - Delete worktree (supports partial matching & dry-run)
+- `wt delete | rm <partial> [--dry-run] [--yes]` - Delete worktree with a risk preview and confirmation
 
 ### Workflow Commands
 - `wt push` - Commit all changes & push current worktree (creates origin if missing)
@@ -157,6 +158,9 @@ wt delete feature --dry-run
 
 # Actually delete
 wt delete feature
+
+# Skip confirmation in automation
+wt delete feature --yes
 ```
 
 ### Organization with Tags
@@ -199,7 +203,7 @@ wt list ui         # Shows UI-related worktrees
 
 ## Configuration
 
-Worktrees are stored in `~/.worktrees/` by default. On Windows, uses `%USERPROFILE%/.worktrees/`.
+Worktrees are stored in `~/.worktrees/` by default. Override this per command with `--dir`, or globally with `WT_WORKTREES_DIR`.
 
 ### Folder Structure
 
@@ -227,15 +231,19 @@ Each folder contains a complete working directory for that branch. Branch names 
 ## Options
 
 - `-f, --force` - Force operations (overwrite/remove)
-- `-d, --dir <path>` - Create the worktree under `<path>` instead of `~/.worktrees` (create, checkout, and time only)
+- `-d, --dir <path>` - Use a different managed worktree directory
 - `--copy <patterns>` - Copy files/directories matching patterns to worktree (create only)
 - `--current` - Show only worktrees for current repository (list only)
 - `--dry-run` - Show what would be deleted without doing it (delete only)
+- `-y, --yes` - Skip an interactive confirmation where supported
+- `--no-shell` - Create the worktree without opening a shell (create, checkout, and time)
 - `-h, --help` - Show help
+
+Colors are automatically disabled when output is redirected. Set `NO_COLOR=1` to disable them explicitly.
 
 ## Interactive Selection
 
-When multiple worktrees match your partial input, you'll see an interactive menu:
+When multiple worktrees match your partial input, `wt` presents a keyboard-driven selection prompt. In a non-interactive environment it fails safely and asks for a more specific value instead of guessing.
 
 ```bash
 ❯ wt delete test
@@ -244,26 +252,40 @@ Multiple worktrees match 'test':
   test-bugfix (/Users/you/.worktrees/test-bugfix)
   testing-ui (/Users/you/.worktrees/testing-ui)
 
-Select branch:
-1) test-feature
-2) test-bugfix  
-3) testing-ui
-Select option (1-3): 
+◆  Multiple worktrees match 'test'
+│  ● test-feature  /Users/you/.worktrees/test-feature
+│    test-bugfix   /Users/you/.worktrees/test-bugfix
+└
 ```
 
 ## Requirements
 
 - Git (with worktree support)
-- Bash shell (available on all platforms via Git Bash on Windows)
+- Node.js 20.12 or newer
+- Bun for source development and releases
 
 ## Platform Support
 
-| Platform | Shell | Status |
-|----------|-------|--------|
-| macOS    | bash/zsh | ✅ Native |
-| Linux    | bash/sh | ✅ Native |
-| Windows  | Git Bash | ✅ Via Git for Windows |
-| Windows  | WSL | ✅ Via Windows Subsystem for Linux |
+| Platform | Runtime | Status |
+|----------|---------|--------|
+| macOS    | Node.js 20.12+ | ✅ Native |
+| Linux    | Node.js 20.12+ | ✅ Native |
+| Windows  | Node.js 20.12+ | ✅ Native |
+| WSL      | Node.js 20.12+ | ✅ Native |
+
+## Development
+
+The source is TypeScript. Bun type-checks, tests, and bundles it into the single executable published as `bin/wt`.
+
+```bash
+bun install
+bun run check
+bun test
+bun run build
+bun run verify
+```
+
+The CLI uses Commander for strict command parsing, Clack for prompt primitives, and picocolors for TTY-aware styling. Git remains the source of truth; the implementation invokes Git directly rather than reimplementing repository semantics.
 
 ## Contributing
 
@@ -277,6 +299,14 @@ Select option (1-3):
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### v2.0.0
+- 🚀 **REWRITTEN**: Native TypeScript CLI bundled into a single Node.js executable with Bun.
+- 🎨 **NEW**: TTY-aware colors, aligned tables, keyboard-driven selections, and structured confirmations.
+- 🛡️ **SAFER**: Destructive deletion now shows risk context and asks for confirmation unless `--yes` or `--force` is provided.
+- 🪟 **CROSS-PLATFORM**: Windows now runs natively on Node.js instead of requiring Git Bash.
+- 🧪 **TESTED**: Integration coverage for create, checkout, list, copy, tag, delete, sync, push, time-machine, external paths, and non-interactive behavior.
+- 🐛 **FIXED**: `wt sync` now searches the resolved current branch instead of the original empty argument.
 
 ### v1.0.6
 - ✨ **NEW**: `-d, --dir <path>` overrides the worktree location for create, checkout, and time commands.

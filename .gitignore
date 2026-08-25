@@ -1,4 +1,6 @@
 .vscode/
 .claude/
+node_modules/
+.worktrees/
 
 .env*

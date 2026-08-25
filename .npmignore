@@ -20,9 +20,6 @@ Thumbs.db
 dist/
 build/
 
-# Original script (keep only the bin version)
-wt.sh
-
 # Test files
 test/
 tests/

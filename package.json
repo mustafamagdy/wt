@@ -1,15 +1,19 @@
 {
   "name": "git-wt",
-  "version": "1.0.6",
+  "version": "2.0.0",
   "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
+  "type": "module",
   "main": "bin/wt",
   "bin": {
     "wt": "./bin/wt"
   },
   "scripts": {
-    "test": "bash bin/wt help",
+    "build": "bun build src/cli.ts --target=node --outfile=bin/wt --banner='#!/usr/bin/env node' && chmod +x bin/wt",
+    "check": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run check && bun test && bun run build && bin/wt --help",
     "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'",
-    "cp": "mkdir -p bin && cp wt.sh bin/wt && chmod +x bin/wt && cp bin/wt \"$(npm prefix -g)/bin/\" && echo '✅ Copied wt.sh to bin/wt and global bin'"
+    "prepublishOnly": "bun run verify"
   },
   "keywords": [
     "git",
@@ -21,7 +25,7 @@
     "tool",
     "cross-platform"
   ],
-  "author": "Your Name <your.email@example.com>",
+  "author": "Mustafa Magdy <mustafa.magdy1@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -32,7 +36,7 @@
   },
   "homepage": "https://github.com/mustafamagdy/wt.git#readme",
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=20.12.0"
   },
   "os": [
     "darwin",
@@ -44,5 +48,14 @@
     "bin/",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "@clack/prompts": "^1.7.0",
+    "@types/bun": "^1.4.0",
+    "@types/node": "^26.3.0",
+    "commander": "14.0.2",
+    "fast-glob": "^3.3.3",
+    "picocolors": "^1.1.1",
+    "typescript": "^7.0.2"
+  }
 }

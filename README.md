@@ -45,6 +45,9 @@ wt create feature/api --copy .env,.env.local
 # Create with all claude files/directories copied
 wt create test --copy "claude*"
 
+# Create worktree in a custom location instead of ~/.worktrees
+wt create feat -d ~/scratch
+
 # Switch to worktree (partial matching)
 wt sw feat
 
@@ -69,8 +72,8 @@ wt sg ui
 
 ### Core Commands
 - `wt list | ls | l [pattern] [--current]` - List all worktrees with status (optional pattern filter, --current shows only current repo worktrees)
-- `wt create | new <branch> [base] [--copy <patterns>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs)
-- `wt checkout | co <branch>` - Checkout existing branch in worktree
+- `wt create | new <branch> [base] [--copy <patterns>] [-d <path>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs, optionally override worktree location)
+- `wt checkout | co <branch> [-d <path>]` - Checkout existing branch in worktree
 - `wt switch | sw <partial>` - Switch to worktree by partial branch name
 - `wt delete | rm <partial> [--dry-run]` - Delete worktree (supports partial matching & dry-run)
 
@@ -224,6 +227,7 @@ Each folder contains a complete working directory for that branch. Branch names 
 ## Options
 
 - `-f, --force` - Force operations (overwrite/remove)
+- `-d, --dir <path>` - Create the worktree under `<path>` instead of `~/.worktrees` (create, checkout, and time only)
 - `--copy <patterns>` - Copy files/directories matching patterns to worktree (create only)
 - `--current` - Show only worktrees for current repository (list only)
 - `--dry-run` - Show what would be deleted without doing it (delete only)
@@ -273,6 +277,11 @@ Select option (1-3):
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### v1.0.6
+- ✨ **NEW**: `-d, --dir <path>` overrides the worktree location for create, checkout, and time commands.
+- 🐛 **FIXED**: `wt list --current` now uses Git's worktree registry, discovering worktrees outside `~/.worktrees`.
+- 🔧 **ENHANCED**: Current-repository listing supports paths with spaces and consistent project names without an origin remote.
 
 ### v1.0.5
 - ✨ **NEW**: `wt create <branch> <base>` - Create new branch + worktree from a specific base branch (local or remote). Falls back to current HEAD when base is omitted.

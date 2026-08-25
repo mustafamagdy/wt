@@ -70,6 +70,8 @@ ADVANCED COMMANDS
 
 OPTIONS
   -f, --force                      Force operations (overwrite/remove)
+  -d, --dir <path>                 Create the worktree under <path> instead of ~/.worktrees
+                                   (create, checkout, and time commands)
   --copy <patterns>                Copy files/dirs matching patterns (create command only)
   --current                        Show only worktrees for current repository (list command only)
   --dry-run                        Show what would be deleted without doing it
@@ -83,6 +85,7 @@ EXAMPLES
     wt create feature/new-ui main               # Create new branch from main
     wt create api --copy .env,.env.local        # Create + copy config files
     wt create test --copy claude*               # Create + copy all claude files/dirs
+    wt create feat -d ~/scratch                 # Create worktree under ~/scratch instead of ~/.worktrees
     wt sw feat                                  # Switch to worktree matching "feat"
     wt sync feat                                # Sync feature branch with origin/main
     wt delete test --dry-run                    # Preview what would be deleted
@@ -203,48 +206,47 @@ resolve_branch_interactive() { # $1=partial_branch_name → exact branch name or
 # ---------- core features (existing) ----------------------------------------
 list_worktrees() { # $1=optional_pattern $2=current_only
   local pattern="$1" current_only="$2"
+  local worktree_dirs=()
+  local current_proj_name=""
   printf "\n%-20s %-25s %-25s %s\n" "PROJECT" "BRANCH" "UPSTREAM" "PATH"
   printf '%0.1s' "-"{1..100}; echo
-  [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
   
-  # Get current repository info if --current flag is used
-  local current_repo_url=""
+  # Git's worktree registry is authoritative for the current repository. This
+  # includes worktrees outside WORKTREES_DIR (for example Codex or IDE-managed
+  # worktrees), which a directory scan cannot discover.
   if [[ "$current_only" == true ]]; then
-    if git rev-parse --show-toplevel >/dev/null 2>&1; then
-      current_repo_url=$(git remote get-url origin 2>/dev/null || echo "")
-      if [[ -z "$current_repo_url" ]]; then
-        # Fallback to using the git toplevel directory name
-        current_repo_url=$(basename "$(git rev-parse --show-toplevel)" 2>/dev/null || echo "")
-      fi
-    else
+    if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
       echo "✖ Not inside a Git repository. --current flag requires being in a git repo."
       return 1
     fi
+    while IFS= read -r line; do
+      [[ "$line" == worktree\ * ]] && worktree_dirs+=("${line#worktree }")
+    done < <(git worktree list --porcelain)
+    current_origin_url=$(git remote get-url origin 2>/dev/null || echo "")
+    if [[ -n "$current_origin_url" ]]; then
+      current_proj_name=$(basename "${current_origin_url%.git}")
+    else
+      current_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+      current_proj_name=$(basename "$(dirname "$current_common_dir")")
+    fi
+  else
+    [[ -d "$WORKTREES_DIR" ]] || { echo "No worktrees found in $WORKTREES_DIR"; return; }
+    for wt_dir in "$WORKTREES_DIR"/*; do
+      [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] && worktree_dirs+=("$wt_dir")
+    done
   fi
   
   local found_matches=false
-  for wt_dir in "$WORKTREES_DIR"/*; do
+  for wt_dir in "${worktree_dirs[@]}"; do
     [[ -d "$wt_dir" && -e "$wt_dir/.git" ]] || continue
     branch=$(git -C "$wt_dir" rev-parse --abbrev-ref HEAD 2>/dev/null || branch_from_folder "$(basename "$wt_dir")")
-    
-    # Apply --current filter if provided
-    if [[ "$current_only" == true ]]; then
-      wt_origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
-      wt_proj_name=$( [[ -n "$wt_origin_url" ]] && basename "${wt_origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
-      current_proj_name=$( [[ -n "$current_repo_url" ]] && basename "${current_repo_url%.git}" || "$current_repo_url" )
-      
-      # Skip if this worktree doesn't belong to the current repository
-      if [[ "$wt_origin_url" != "$current_repo_url" && "$wt_proj_name" != "$current_proj_name" ]]; then
-        continue
-      fi
-    fi
     
     # Apply pattern filter if provided
     if [[ -n "$pattern" ]]; then
       # Check if pattern matches branch name, project name, or path
       if [[ "$branch" != *"$pattern"* ]]; then
         origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
-        proj_name=$( [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
+        proj_name=$( [[ "$current_only" == true ]] && echo "$current_proj_name" || { [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)"; } )
         if [[ "$proj_name" != *"$pattern"* && "$wt_dir" != *"$pattern"* ]]; then
           continue
         fi
@@ -255,7 +257,7 @@ list_worktrees() { # $1=optional_pattern $2=current_only
     upstream=$(git -C "$wt_dir" rev-parse --abbrev-ref @{u} 2>/dev/null || echo "-")
     git -C "$wt_dir" diff --quiet && git -C "$wt_dir" diff --cached --quiet || branch="* ${branch}"
     origin_url=$(git -C "$wt_dir" remote get-url origin 2>/dev/null || echo "")
-    proj_name=$( [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)" )
+    proj_name=$( [[ "$current_only" == true ]] && echo "$current_proj_name" || { [[ -n "$origin_url" ]] && basename "${origin_url%.git}" || basename "$(git -C "$wt_dir" rev-parse --show-toplevel 2>/dev/null)"; } )
     printf "%-20s %-25s %-25s %s\n" "$proj_name" "$branch" "$upstream" "$wt_dir"
   done
   
@@ -601,6 +603,7 @@ cmd_time() {           # $1=branch@date  (YYYY-MM-DD)
 
 cmd_checkout() {       # $1=branch
   [[ -n "$1" ]] || { echo "✖ Branch name required"; exit 1; }
+  require_repo; ensure_dir
   local_branch="$1"
   local_exists=false; remote_exists=false
   git show-ref --verify --quiet "refs/heads/${local_branch}" && local_exists=true
@@ -791,10 +794,13 @@ cmd_sync() { # $1=partial_branch (optional)
 # ---------- argument parsing ------------------------------------------------
 [[ $# -eq 0 ]] && { usage; exit 1; }
 cmd="${1}"; shift
-force=false; copy_files=""; dry_run=false; current_only=false; positional=()
+force=false; copy_files=""; dry_run=false; current_only=false; custom_dir=""; positional=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -f|--force) force=true ;;
+    -d|--dir)   shift
+                [[ $# -gt 0 && ! "$1" =~ ^- ]] || { echo "✖ --dir requires a path argument"; exit 1; }
+                custom_dir="$1" ;;
     --copy)     shift
                 # Collect all arguments until next flag or end
                 copy_files=""
@@ -814,6 +820,17 @@ while [[ $# -gt 0 ]]; do
   esac; shift
 done
 arg="${positional[0]:-}"; arg2="${positional[1]:-}"
+
+# Apply --dir override: use it as the worktrees base directory for this invocation
+if [[ -n "$custom_dir" ]]; then
+  case "$cmd" in
+    create|new|checkout|co|time|tm) ;;
+    *) echo "✖ --dir is only supported for create, checkout, and time commands"; exit 1 ;;
+  esac
+  custom_dir="${custom_dir/#\~/$HOME}"            # expand leading ~
+  [[ "$custom_dir" != /* ]] && custom_dir="$PWD/$custom_dir"  # make relative paths absolute
+  WORKTREES_DIR="$custom_dir"
+fi
 
 # ---------- command dispatch -----------------------------------------------
 case "$cmd" in

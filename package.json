@@ -20,7 +20,7 @@
     "wt": "./bin/wt"
   },
   "scripts": {
-    "build": "bun run clean && bun build src/cli.ts --target=node --outfile=bin/wt --banner='#!/usr/bin/env node' && bun build src/index.ts --target=node --format=esm --outfile=dist/core.js && tsc -p tsconfig.build.json && chmod +x bin/wt",
+    "build": "bun run clean && bun build src/cli.ts --target=node --minify --outfile=bin/wt --banner='#!/usr/bin/env node' && bun build src/index.ts --target=node --format=esm --minify --outfile=dist/core.js && tsc -p tsconfig.build.json && chmod +x bin/wt",
     "clean": "rm -rf dist",
     "check": "tsc --noEmit",
     "test": "bun test",

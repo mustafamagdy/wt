@@ -3,8 +3,8 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  realpathSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -52,18 +52,31 @@ function openShell(cwd: string): void {
 
 function removeTarget(root: string, target: string, force: boolean): void {
   if (!existsSync(target)) return;
+  const registered = registeredWorktreePaths(root).some((path) => samePath(path, target));
+  if (!registered) {
+    throw new CliError(`Refusing to delete an unregistered directory: ${target}. Move it away first.`);
+  }
   const args = ["worktree", "remove"];
   if (force) args.push("--force");
   args.push(target);
-  git(args, root, true);
-  if (existsSync(target)) rmSync(target, { recursive: true, force });
+  git(args, root);
+  if (existsSync(target)) throw new CliError(`Git removed the registration but the directory still exists: ${target}`);
+}
+
+function samePath(left: string, right: string): boolean {
+  const canonical = (path: string) => existsSync(path) ? realpathSync.native(path) : resolve(path);
+  return canonical(left) === canonical(right);
 }
 
 export async function listCommand(
   pattern: string | undefined,
-  options: DirectoryOptions & { current?: boolean },
+  options: DirectoryOptions & { current?: boolean; json?: boolean },
 ): Promise<void> {
   const items = listWorktrees({ root: options.dir, current: Boolean(options.current), ...(pattern ? { pattern } : {}) });
+  if (options.json) {
+    console.log(JSON.stringify(items, null, 2));
+    return;
+  }
   heading(options.current ? "Current repository worktrees" : "Managed worktrees");
   if (!items.length) {
     ui.info(pattern ? `No worktrees match '${pattern}'.` : "No worktrees found.");
@@ -144,10 +157,13 @@ export async function checkoutCommand(branch: string, options: ForceOptions & { 
   const target = join(options.dir, folderFromBranch(branch));
 
   if (existsSync(`${target}/.git`)) {
+    const registered = registeredWorktreePaths(repository).some((path) => samePath(path, target));
+    if (!registered) throw new CliError(`Refusing to use an unregistered Git directory: ${target}. Move it away first.`);
+    if (branchAt(target) !== branch) throw new CliError(`Registered worktree at ${target} has branch '${branchAt(target)}', not '${branch}'.`);
     ui.success(`Using existing worktree at ${target}`);
   } else {
     if (existsSync(target) && !options.force) throw new CliError(`Folder already exists: ${target}. Use --force to replace it.`);
-    if (existsSync(target)) rmSync(target, { recursive: true, force: true });
+    if (existsSync(target)) throw new CliError(`Refusing to delete an unregistered directory: ${target}. Move it away first.`);
     const args = ["worktree", "add"];
     if (!existing.local && existing.remote) args.push("-b", branch);
     args.push(target, existing.local ? branch : `origin/${branch}`);

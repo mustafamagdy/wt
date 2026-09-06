@@ -1,17 +1,31 @@
 {
   "name": "git-wt",
-  "version": "2.0.0",
-  "description": "Cross-platform Git worktree management tool with intelligent partial matching and tagging",
+  "version": "2.1.0",
+  "description": "Typed Git worktree management library and interactive CLI",
   "type": "module",
-  "main": "bin/wt",
+  "main": "./dist/core.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./core": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/core.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "wt": "./bin/wt"
   },
   "scripts": {
-    "build": "bun build src/cli.ts --target=node --outfile=bin/wt --banner='#!/usr/bin/env node' && chmod +x bin/wt",
+    "build": "bun run clean && bun build src/cli.ts --target=node --outfile=bin/wt --banner='#!/usr/bin/env node' && bun build src/index.ts --target=node --format=esm --outfile=dist/core.js && tsc -p tsconfig.build.json && chmod +x bin/wt",
+    "clean": "rm -rf dist",
     "check": "tsc --noEmit",
     "test": "bun test",
-    "verify": "bun run check && bun test && bun run build && bin/wt --help",
+    "pack:check": "bun pm pack --dry-run",
+    "verify": "bun run check && bun test && bun run build && bun run pack:check && bin/wt --help",
     "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'",
     "prepublishOnly": "bun run verify"
   },
@@ -46,8 +60,11 @@
   "preferGlobal": true,
   "files": [
     "bin/",
+    "dist/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CONTEXT.md",
+    "docs/adr/"
   ],
   "devDependencies": {
     "@clack/prompts": "^1.7.0",

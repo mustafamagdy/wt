@@ -70,6 +70,28 @@ describe("CLI", () => {
     expect(result.stdout).toContain(outside);
   });
 
+  test("prints machine-readable JSON without UI text", () => {
+    const { repository, managed } = fixture();
+    git(["branch", "json-output"], repository);
+    git(["worktree", "add", "-q", join(managed, "json-output"), "json-output"], repository);
+    const result = wt(["list", "--current", "--json", "--dir", managed], repository);
+    expect(result.status).toBe(0);
+    const items = JSON.parse(result.stdout) as Array<{ branch: string; path: string }>;
+    expect(items.some((item) => item.branch === "json-output" && item.path.endsWith("/json-output"))).toBe(true);
+  });
+
+  test("force checkout never deletes an unregistered directory", () => {
+    const { repository, managed } = fixture();
+    git(["branch", "occupied"], repository);
+    const target = join(managed, "occupied");
+    git(["init", "-q", target], repository);
+    writeFileSync(join(target, "keep.txt"), "keep\n");
+    const result = wt(["checkout", "occupied", "--force", "--dir", managed, "--no-shell"], repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Refusing to use an unregistered Git directory");
+    expect(readFileSync(join(target, "keep.txt"), "utf8")).toBe("keep\n");
+  });
+
   test("copies matching files without copying Git metadata", () => {
     const { repository, managed } = fixture();
     writeFileSync(join(repository, ".env.example"), "SAFE=value\n");

@@ -1,6 +1,7 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
-import { branchAt, git, gitOk, optionalGitText, requireRepository } from "./git.js";
+import { parseWorktreePorcelain } from "./core/parser.js";
+import { branchAt, git, gitOk, gitRaw, optionalGitText, requireRepository } from "./git.js";
 
 export interface Worktree {
   path: string;
@@ -15,11 +16,8 @@ export interface Worktree {
 
 export function registeredWorktreePaths(cwd = process.cwd()): string[] {
   requireRepository(cwd);
-  const output = git(["worktree", "list", "--porcelain"], cwd).stdout;
-  return output
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => line.slice("worktree ".length));
+  const output = gitRaw(["worktree", "list", "--porcelain", "-z"], cwd).stdout;
+  return parseWorktreePorcelain(output).map((item) => item.path);
 }
 
 export function managedWorktreePaths(root: string): string[] {

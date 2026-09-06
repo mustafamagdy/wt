@@ -1,6 +1,30 @@
 # Git Worktree Manager (`wt`)
 
-🚀 A polished, cross-platform Git worktree CLI with intelligent matching, safe workflows, and interactive prompts.
+🚀 A typed Git worktree library plus a polished, cross-platform CLI.
+
+## Library API
+
+The public API treats Git's worktree registry as the source of truth. It uses
+the NUL-delimited porcelain format, so unusual paths are preserved exactly.
+
+```ts
+import { WorktreeManager } from "git-wt/core";
+
+const worktrees = new WorktreeManager({ cwd: "/path/to/repository" });
+
+const state = worktrees.list();
+worktrees.add({ path: "/worktrees/my-feature", branch: "feature/my-feature", startPoint: "main" });
+worktrees.lock("/worktrees/my-feature", "long-running task");
+worktrees.move("/worktrees/my-feature", "/worktrees/my-feature-renamed");
+worktrees.unlock("/worktrees/my-feature-renamed");
+worktrees.remove("/worktrees/my-feature-renamed");
+```
+
+Every mutation returns the registry state before and after the command. The
+runner is injectable for tests and automation. Destructive operations require
+an exact registered path and never recursively delete an arbitrary directory.
+
+Use `wt list --current --json` for machine-readable CLI output.
 
 ## Features
 

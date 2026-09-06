@@ -42,6 +42,20 @@ export function git(args: string[], cwd?: string, allowFailure = false): RunResu
   return run("git", args, { ...(cwd ? { cwd } : {}), allowFailure });
 }
 
+/** Raw Git output for machine formats where trailing NUL/newlines are data. */
+export function gitRaw(args: string[], cwd?: string, allowFailure = false): RunResult {
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  if (result.error) throw new CliError(`Unable to run git: ${result.error.message}`);
+  const output = { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status ?? 1 };
+  if (output.status !== 0 && !allowFailure) throw new CliError(output.stderr.trimEnd() || output.stdout.trimEnd() || `git exited with status ${output.status}`);
+  return output;
+}
+
 export function gitOk(args: string[], cwd?: string): boolean {
   return git(args, cwd, true).status === 0;
 }

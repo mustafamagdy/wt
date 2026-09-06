@@ -39,6 +39,7 @@ program
   .aliases(["ls", "l"])
   .description("list managed worktrees")
   .option("--current", "show every worktree registered to the current repository")
+  .option("--json", "print stable machine-readable JSON")
   .option(...directoryOption)
   .action(listCommand);
 

@@ -1,6 +1,6 @@
 {
   "name": "git-wt",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Typed Git worktree management library and interactive CLI",
   "type": "module",
   "main": "./dist/core.js",

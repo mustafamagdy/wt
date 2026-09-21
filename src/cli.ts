@@ -45,7 +45,7 @@ program
   .action(listCommand);
 
 program
-  .command("create <branch> [base]")
+  .command("create [branch] [base]")
   .alias("new")
   .description("create a branch and worktree")
   .option("-f, --force", "replace an existing target directory")
@@ -55,7 +55,7 @@ program
   .action(createCommand);
 
 program
-  .command("checkout <branch>")
+  .command("checkout [branch]")
   .alias("co")
   .description("check out an existing branch in a worktree")
   .option("-f, --force", "replace a stale target directory")
@@ -64,14 +64,14 @@ program
   .action(checkoutCommand);
 
 program
-  .command("switch <partial>")
+  .command("switch [partial]")
   .alias("sw")
   .description("open a worktree by partial branch name")
   .option(...directoryOption)
   .action(switchCommand);
 
 program
-  .command("delete <partial>")
+  .command("delete [partial]")
   .aliases(["remove", "rm"])
   .description("remove a managed worktree")
   .option("-f, --force", "remove even when the worktree is dirty")
@@ -94,14 +94,14 @@ program
   .action(pushCommand);
 
 program
-  .command("tag <partial> <tag>")
+  .command("tag [partial] [tag]")
   .alias("label")
   .description("tag a managed worktree")
   .option(...directoryOption)
   .action(tagCommand);
 
 program
-  .command("switch-group <tag>")
+  .command("switch-group [tag]")
   .aliases(["switchg", "sg"])
   .description("open a worktree by tag")
   .option(...directoryOption)

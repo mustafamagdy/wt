@@ -37,7 +37,7 @@ describe("CLI", () => {
     const result = wt(["--help"], project);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("A fast, polished Git worktree manager");
-    expect(result.stdout).toContain("create [options] <branch> [base]");
+    expect(result.stdout).toContain("create [options] [branch] [base]");
   });
 
   test("creates, lists, tags, previews deletion, and removes a worktree", () => {
@@ -170,5 +170,16 @@ describe("CLI", () => {
     expect(cleaned.status).toBe(0);
     expect(existsSync(join(managed, "done"))).toBe(false);
     expect(existsSync(join(managed, "wip", "draft.txt"))).toBe(true);
+  });
+
+  test("asks for missing arguments only in a terminal", () => {
+    const { repository, managed } = fixture();
+    git(["branch", "picker"], repository);
+    git(["worktree", "add", "-q", join(managed, "picker"), "picker"], repository);
+    for (const args of [["switch"], ["delete"], ["checkout"], ["create"], ["switch-group"]]) {
+      const result = wt([...args, "--dir", managed], repository);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("run in a terminal to pick one");
+    }
   });
 });

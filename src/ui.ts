@@ -28,27 +28,28 @@ function unwrap<T>(value: T | symbol): T {
   return value as T;
 }
 
-export async function choose<T extends string>(
-  message: string,
-  options: Array<{ value: T; label: string; hint?: string }>,
-): Promise<T> {
-  if (!process.stdin.isTTY) throw new CliError(`${message} Pass a more specific value in non-interactive mode.`);
-  const promptOptions: Option<T>[] = options.map((option) =>
-    option.hint === undefined
-      ? ({ value: option.value, label: option.label } as Option<T>)
-      : ({ value: option.value, label: option.label, hint: option.hint } as Option<T>),
-  );
-  return unwrap(
-    await p.select({
-      message,
-      options: promptOptions,
-    }),
-  );
-}
-
 export async function confirm(message: string, initialValue = false): Promise<boolean> {
   if (!process.stdin.isTTY) return false;
   return unwrap(await p.confirm({ message, initialValue }));
+}
+
+/** Type-to-filter single choice; matches label and hint. */
+export async function search<T extends string>(
+  message: string,
+  options: Array<{ value: T; label: string; hint?: string }>,
+  initialUserInput?: string,
+): Promise<T> {
+  if (!process.stdin.isTTY) throw new CliError(`${message} Pass a more specific value in non-interactive mode.`);
+  return unwrap(await p.autocomplete({
+    message,
+    options: options.map((option) => (option.hint === undefined
+      ? { value: option.value, label: option.label }
+      : { value: option.value, label: option.label, hint: option.hint }) as Option<T>),
+    maxItems: 12,
+    placeholder: "type to filter",
+    ...(initialUserInput ? { initialUserInput } : {}),
+    filter: (term, option) => `${option.label ?? ""} ${option.hint ?? ""}`.toLowerCase().includes(term.toLowerCase()),
+  }));
 }
 
 export async function chooseMany<T extends string>(

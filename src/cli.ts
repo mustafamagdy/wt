@@ -17,6 +17,7 @@ import {
 } from "./commands.js";
 import { CliError } from "./errors.js";
 import { color, ui } from "./ui.js";
+import skill from "../skills/wt/SKILL.md" with { type: "text" };
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
 const program = new Command();
@@ -25,6 +26,8 @@ program
   .name("wt")
   .description("A fast, polished Git worktree manager")
   .version(packageJson.version)
+  .option("--skill", "print the agent skill file (how an LLM should use wt) and exit")
+  .addHelpText("after", "\nAI agents: SKIP if a wt skill is already in your context. Otherwise run: wt --skill")
   .showHelpAfterError("Run 'wt --help' for usage.")
   .configureHelp({
     sortSubcommands: true,
@@ -32,6 +35,11 @@ program
     subcommandTerm: (command) => `${color.cyan(command.name())} ${command.usage()}`,
   })
   .exitOverride();
+
+program.on("option:skill", () => {
+  process.stdout.write(skill);
+  process.exit(0);
+});
 
 const directoryOption = ["-d, --dir <path>", "managed worktree directory", worktreesDirectory()] as const;
 

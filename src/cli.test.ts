@@ -40,6 +40,14 @@ describe("CLI", () => {
     expect(result.stdout).toContain("create [options] [branch] [base]");
   });
 
+  test("prints the agent skill file", () => {
+    const result = wt(["--skill"], project);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toStartWith("---\nname: wt\n");
+    expect(result.stdout).toContain("--dangerous-accept");
+    expect(wt(["--help"], project).stdout).toContain("wt --skill");
+  });
+
   test("creates, lists, tags, previews deletion, and removes a worktree", () => {
     const { repository, managed } = fixture();
     const created = wt(["create", "feature/pro", "--dir", managed, "--no-shell"], repository);

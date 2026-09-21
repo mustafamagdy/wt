@@ -26,7 +26,7 @@
     "test": "bun test",
     "pack:check": "bun pm pack --dry-run",
     "verify": "bun run check && bun test && bun run build && bun run pack:check && bin/wt --help",
-    "postinstall": "echo '\n✅ git-wt installed! Run \"wt help\" to get started.\n'",
+    "postinstall": "echo '\n\u2705 git-wt installed! Run \"wt help\" to get started.\n'",
     "prepublishOnly": "bun run verify"
   },
   "keywords": [
@@ -61,6 +61,7 @@
   "files": [
     "bin/",
     "dist/",
+    "skills/",
     "README.md",
     "LICENSE",
     "CONTEXT.md",

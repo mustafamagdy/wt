@@ -249,6 +249,19 @@ wt list feature    # Shows all feature branches
 wt list ui         # Shows UI-related worktrees
 ```
 
+## AI Agents
+
+`wt --skill` prints a skill file that teaches an LLM coding agent how to use
+`wt` safely without a terminal: which flags to pass, how to preview before
+deleting, and how to read state as JSON. Paste it into your agent's context, or
+save it as a skill:
+
+```bash
+mkdir -p ~/.claude/skills/wt && wt --skill > ~/.claude/skills/wt/SKILL.md
+```
+
+The same file ships in the package at `skills/wt/SKILL.md`.
+
 ## Configuration
 
 Worktrees are stored in `~/.worktrees/` by default. Override this per command with `--dir`, or globally with `WT_WORKTREES_DIR`.

@@ -147,4 +147,28 @@ describe("CLI", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Pass a more specific value");
   });
+
+  test("cleans merged worktrees only after an explicit non-interactive accept", () => {
+    const { repository, managed } = fixture();
+    git(["branch", "done"], repository);
+    git(["branch", "wip"], repository);
+    git(["worktree", "add", "-q", join(managed, "done"), "done"], repository);
+    git(["worktree", "add", "-q", join(managed, "wip"), "wip"], repository);
+    writeFileSync(join(managed, "wip", "draft.txt"), "draft\n");
+
+    const preview = wt(["clean", "--dry-run", "--no-fetch", "--dir", managed], repository);
+    expect(preview.status).toBe(0);
+    expect(preview.stdout).toContain("uncommitted changes");
+    expect(preview.stdout).toContain("Dry run");
+
+    const refused = wt(["clean", "--no-fetch", "--dir", managed], repository);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("--dangerous-accept");
+    expect(existsSync(join(managed, "done"))).toBe(true);
+
+    const cleaned = wt(["clean", "--no-fetch", "--dangerous-accept", "--dir", managed], repository);
+    expect(cleaned.status).toBe(0);
+    expect(existsSync(join(managed, "done"))).toBe(false);
+    expect(existsSync(join(managed, "wip", "draft.txt"))).toBe(true);
+  });
 });

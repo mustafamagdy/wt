@@ -9,10 +9,11 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import fg from "fast-glob";
+import { analyzeCleanup, executeCleanup, type CleanCandidate } from "./core/cleanup.js";
 import { folderFromBranch } from "./config.js";
 import { CliError } from "./errors.js";
 import { branchAt, git, gitOk, hasChanges, optionalGitText, requireRepository } from "./git.js";
-import { choose, color, confirm, heading, input, renderTable, ui } from "./ui.js";
+import { choose, chooseMany, color, confirm, heading, input, renderTable, spinner, ui } from "./ui.js";
 import {
   branchExists,
   directorySize,
@@ -332,4 +333,118 @@ export async function pushCommand(options: { message?: string }): Promise<void> 
   }
   git(["push", "-u", "origin", branch], repository);
   ui.success(`Pushed ${branch} to origin.`);
+}
+
+export interface CleanOptions extends DirectoryOptions {
+  current?: boolean;
+  dryRun?: boolean;
+  dangerousAccept?: boolean;
+  deleteBranch?: boolean;
+  fetch?: boolean;
+}
+
+const cleanLabels: Record<CleanCandidate["verdict"]["reason"], string> = {
+  merged: "merged",
+  "squash-merged": "squash merged",
+  pushed: "pushed",
+  missing: "folder missing",
+  primary: "main checkout",
+  bare: "bare repository",
+  locked: "locked",
+  current: "you are in it",
+  dirty: "uncommitted changes",
+  unpushed: "unpushed commits",
+  error: "check failed",
+};
+
+export async function cleanCommand(options: CleanOptions): Promise<void> {
+  const currentPath = optionalGitText(["rev-parse", "--show-toplevel"]);
+  if (options.current && !currentPath) throw new CliError("Not inside a Git repository.");
+  const paths = options.current ? [currentPath!] : managedWorktreePaths(options.dir);
+  if (!paths.length) {
+    ui.info("No managed worktrees found.");
+    return;
+  }
+
+  const progress = spinner();
+  progress.start(options.fetch === false ? "Checking worktrees…" : "Fetching remotes and checking worktrees…");
+  const fetchErrors: string[] = [];
+  const candidates = await analyzeCleanup({
+    paths,
+    ...(options.current ? {} : { within: options.dir }),
+    fetch: options.fetch !== false,
+    ...(currentPath ? { currentPath } : {}),
+    onFetchError: (repository, message) => fetchErrors.push(`${repository}: ${message}`),
+  });
+  const reported = candidates.filter((c) => !["primary", "bare"].includes(c.verdict.reason));
+  const removable = reported.filter((c) => c.verdict.removable);
+  progress.stop(`Checked ${reported.length} worktree${reported.length === 1 ? "" : "s"}.`);
+  for (const error of fetchErrors) ui.warning(`Fetch failed, using local refs. ${error}`);
+
+  const groups = groupByRepository(reported);
+  for (const [name, items] of groups) {
+    heading(name);
+    renderTable(["", "BRANCH", "STATUS", "PATH"], items.map((c) => [
+      c.verdict.removable ? color.green("✓") : color.yellow("•"),
+      c.branch ?? color.dim(`detached ${c.worktree.head.slice(0, 7)}`),
+      (c.verdict.removable ? color.green : color.yellow)(cleanLabels[c.verdict.reason] + (!c.verdict.removable && c.verdict.detail ? `: ${c.verdict.detail}` : "")),
+      color.dim(c.worktree.path),
+    ]));
+  }
+  console.log();
+  if (!removable.length) {
+    ui.info("Nothing to clean.");
+    return;
+  }
+  if (options.dryRun) {
+    ui.info(`${removable.length} worktree${removable.length === 1 ? "" : "s"} can be removed. Dry run: nothing changed.`);
+    return;
+  }
+
+  let selected = removable;
+  if (!options.dangerousAccept) {
+    if (!process.stdin.isTTY) throw new CliError("Choosing worktrees needs a terminal. Pass --dangerous-accept to remove every safe one, or --dry-run to preview.");
+    const chosen = new Set(await chooseMany(
+      "Select worktrees to remove (space toggles, enter confirms)",
+      Object.fromEntries([...groupByRepository(removable)].map(([name, items]) => [name, items.map((c) => ({
+        value: c.worktree.path,
+        label: c.branch ?? `detached ${c.worktree.head.slice(0, 7)}`,
+        hint: `${cleanLabels[c.verdict.reason]}, ${c.worktree.path}`,
+      }))])),
+      removable.map((c) => c.worktree.path),
+    ));
+    selected = removable.filter((c) => chosen.has(c.worktree.path));
+    if (!selected.length) {
+      ui.info("Nothing selected; no worktrees removed.");
+      return;
+    }
+  }
+
+  progress.start(`Removing ${selected.length} worktree${selected.length === 1 ? "" : "s"}…`);
+  const results = await executeCleanup(selected, { deleteBranch: Boolean(options.deleteBranch) });
+  const failed = results.filter((r) => !r.ok || r.error);
+  progress.stop(`Removed ${results.filter((r) => r.ok).length} of ${results.length}.`);
+  for (const result of results) {
+    const label = result.candidate.branch ?? result.candidate.worktree.path;
+    if (!result.ok) ui.warning(`Could not remove ${label}: ${result.error}`);
+    else if (result.error) ui.warning(`Removed ${label}, ${result.error}`);
+    else ui.success(`Removed ${label}${result.branchDeleted ? " and its branch" : ""}`);
+  }
+  if (failed.length) process.exitCode = 1;
+}
+
+function groupByRepository(candidates: readonly CleanCandidate[]): Map<string, CleanCandidate[]> {
+  const byRepository = new Map<string, CleanCandidate[]>();
+  for (const candidate of candidates) {
+    byRepository.set(candidate.repository, [...(byRepository.get(candidate.repository) ?? []), candidate]);
+  }
+  const nameCounts = new Map<string, number>();
+  for (const [, items] of byRepository) nameCounts.set(items[0]!.repositoryName, (nameCounts.get(items[0]!.repositoryName) ?? 0) + 1);
+  // Two repositories can share a display name; keep them apart by showing the Git directory.
+  return new Map([...byRepository]
+    .map(([repository, items]) => {
+      const name = items[0]!.repositoryName;
+      return [nameCounts.get(name)! > 1 ? `${name} (${repository})` : name, items] as const;
+    })
+    .sort(([a], [b]) => a.localeCompare(b)));
 }

@@ -106,6 +106,7 @@ wt sg ui
 - `wt push` - Commit all changes & push current worktree (creates origin if missing)
 - `wt sync [partial]` - Sync worktree with origin/main (auto stash/unstash, auto-detects current branch)
 - `wt du` - Show disk usage per worktree (with total)
+- `wt clean [--current] [--dry-run] [--dangerous-accept] [--delete-branch] [--no-fetch]` - Remove worktrees whose work is already merged, squash merged, or pushed. Checks run in parallel, results are grouped by repository, and you pick which ones to remove
 
 ### Organization Commands
 - `wt tag <partial> <tag>` - Tag a worktree with group label
@@ -186,6 +187,26 @@ wt delete feature
 # Skip confirmation in automation
 wt delete feature --yes
 ```
+
+### Cleaning Up Finished Worktrees
+```bash
+# Fetch, check every managed worktree in parallel, then pick which to remove
+wt clean
+
+# Only this repository's worktrees, and delete their local branches too
+wt clean --current --delete-branch
+
+# Preview only
+wt clean --dry-run
+
+# Scripts and CI: remove every safe worktree without prompting
+wt clean --dangerous-accept
+```
+
+A worktree is offered for removal only when it has no uncommitted or untracked
+changes and its commit is merged into the default branch (including squash and
+rebase merges) or exists on a remote branch. The main checkout, locked
+worktrees, and the worktree you are standing in are never removed.
 
 ### Organization with Tags
 ```bash

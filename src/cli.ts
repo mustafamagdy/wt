@@ -3,6 +3,7 @@ import { Command, CommanderError } from "commander";
 import { worktreesDirectory } from "./config.js";
 import {
   checkoutCommand,
+  cleanCommand,
   createCommand,
   deleteCommand,
   duCommand,
@@ -114,6 +115,17 @@ program
   .option("--no-shell", "do not open an interactive shell in the worktree")
   .option(...directoryOption)
   .action(timeCommand);
+
+program
+  .command("clean")
+  .description("remove worktrees whose work is already merged or pushed")
+  .option("--current", "check every worktree registered to the current repository")
+  .option("--dry-run", "show what would be removed")
+  .option("--dangerous-accept", "remove every safe worktree without asking")
+  .option("--delete-branch", "also delete the local branch of each removed worktree")
+  .option("--no-fetch", "skip fetching remotes first (faster, may be out of date)")
+  .option(...directoryOption)
+  .action(cleanCommand);
 
 program
   .command("du")

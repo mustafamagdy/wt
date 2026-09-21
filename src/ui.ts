@@ -51,6 +51,27 @@ export async function confirm(message: string, initialValue = false): Promise<bo
   return unwrap(await p.confirm({ message, initialValue }));
 }
 
+export async function chooseMany<T extends string>(
+  message: string,
+  groups: Record<string, Array<{ value: T; label: string; hint?: string }>>,
+  initialValues: T[],
+): Promise<T[]> {
+  if (!process.stdin.isTTY) throw new CliError(`${message} Interactive selection needs a terminal.`);
+  const options = Object.fromEntries(Object.entries(groups).map(([group, items]) => [
+    group,
+    items.map((item) => (item.hint === undefined
+      ? { value: item.value, label: item.label }
+      : { value: item.value, label: item.label, hint: item.hint }) as Option<T>),
+  ]));
+  return unwrap(await p.groupMultiselect({ message, options, initialValues, required: false, groupSpacing: 1 }));
+}
+
+export function spinner(): { start(message: string): void; stop(message: string): void } {
+  if (!process.stdout.isTTY) return { start: (message) => ui.info(message), stop: () => {} };
+  const spin = p.spinner();
+  return { start: (message) => spin.start(message), stop: (message) => spin.stop(message) };
+}
+
 export async function input(message: string, placeholder?: string): Promise<string> {
   if (!process.stdin.isTTY) throw new CliError(`${message} Input is required in non-interactive mode.`);
   return (unwrap(

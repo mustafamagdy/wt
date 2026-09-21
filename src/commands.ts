@@ -10,10 +10,12 @@ import {
 import { basename, dirname, join, resolve } from "node:path";
 import fg from "fast-glob";
 import { analyzeCleanup, executeCleanup, type CleanCandidate } from "./core/cleanup.js";
+import { SystemAsyncGitRunner } from "./core/runner.js";
+import { parseWorktreePorcelain } from "./core/parser.js";
 import { folderFromBranch } from "./config.js";
 import { CliError } from "./errors.js";
-import { branchAt, git, gitOk, hasChanges, optionalGitText, requireRepository } from "./git.js";
-import { choose, chooseMany, color, confirm, heading, input, renderTable, spinner, ui } from "./ui.js";
+import { branchAt, git, gitOk, gitRaw, hasChanges, optionalGitText, requireRepository } from "./git.js";
+import { chooseMany, color, confirm, heading, input, renderTable, search, spinner, ui } from "./ui.js";
 import {
   branchExists,
   directorySize,
@@ -33,15 +35,36 @@ export interface ForceOptions extends DirectoryOptions {
   force?: boolean;
 }
 
-async function resolveWorktree(root: string, partial: string): Promise<Worktree> {
-  const matches = findManagedWorktrees(root, partial);
-  if (!matches.length) throw new CliError(`No worktree found matching '${partial}'.`);
-  if (matches.length === 1) return matches[0]!;
-  const selected = await choose(
-    `Multiple worktrees match '${partial}'`,
-    matches.map((match) => ({ value: match.path, label: match.branch, hint: match.path })),
+async function resolveWorktree(root: string, partial: string | undefined): Promise<Worktree> {
+  const matches = partial === undefined ? findManagedWorktrees(root, "") : findManagedWorktrees(root, partial);
+  if (!matches.length) throw new CliError(partial === undefined ? "No managed worktrees found." : `No worktree found matching '${partial}'.`);
+  if (matches.length === 1 && partial !== undefined) return matches[0]!;
+  if (partial === undefined) requireTerminal("a worktree");
+  const selected = await search(
+    partial === undefined ? "Pick a worktree" : `Multiple worktrees match '${partial}'`,
+    matches.map((match) => ({ value: match.path, label: match.branch, hint: worktreeHint(match) })),
   );
   return matches.find((match) => match.path === selected)!;
+}
+
+function worktreeHint(worktree: Worktree): string {
+  return `${worktree.dirty ? "● uncommitted, " : ""}${worktree.project}, ${worktree.path}`;
+}
+
+/** Missing arguments are picked interactively; without a terminal they stay an error. */
+function requireTerminal(what: string): void {
+  if (!process.stdin.isTTY) throw new CliError(`Missing ${what}. Pass it as an argument, or run in a terminal to pick one.`);
+}
+
+/** Branches that exist locally or on origin, local first. */
+function knownBranches(repository: string): Array<{ name: string; local: boolean }> {
+  const refs = git(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"], repository).stdout
+    .split("\n").filter(Boolean);
+  const local = new Set(refs.filter((ref) => ref.startsWith("refs/heads/")).map((ref) => ref.slice("refs/heads/".length)));
+  const remote = refs.filter((ref) => ref.startsWith("refs/remotes/origin/"))
+    .map((ref) => ref.slice("refs/remotes/origin/".length))
+    .filter((name) => name !== "HEAD" && !local.has(name));
+  return [...[...local].map((name) => ({ name, local: true })), ...remote.map((name) => ({ name, local: false }))];
 }
 
 function openShell(cwd: string): void {
@@ -95,11 +118,22 @@ export async function listCommand(
 }
 
 export async function createCommand(
-  branch: string,
-  base: string | undefined,
+  branchArgument: string | undefined,
+  baseArgument: string | undefined,
   options: ForceOptions & { copy?: string; shell?: boolean },
 ): Promise<void> {
   const repository = requireRepository();
+  let branch = branchArgument;
+  let base = baseArgument;
+  if (branch === undefined) {
+    requireTerminal("a branch name");
+    branch = await input("New branch name");
+    const picked = await search("Start from", [
+      { value: "", label: "current HEAD", hint: branchAt(repository) },
+      ...knownBranches(repository).map((item) => ({ value: item.name, label: item.name, hint: item.local ? "local" : "origin" })),
+    ]);
+    base = picked || undefined;
+  }
   mkdirSync(options.dir, { recursive: true });
   const existing = branchExists(branch, repository);
   if (existing.local) throw new CliError(`Branch '${branch}' already exists. Use 'wt checkout ${branch}'.`);
@@ -150,8 +184,21 @@ function copyPatterns(repository: string, target: string, patterns: string): voi
   }
 }
 
-export async function checkoutCommand(branch: string, options: ForceOptions & { shell?: boolean }): Promise<void> {
+export async function checkoutCommand(branchArgument: string | undefined, options: ForceOptions & { shell?: boolean }): Promise<void> {
   const repository = requireRepository();
+  let branch = branchArgument;
+  if (branch === undefined) {
+    requireTerminal("a branch");
+    const checkedOut = new Set(parseWorktreePorcelain(gitRaw(["worktree", "list", "--porcelain", "-z"], repository).stdout)
+      .map((item) => item.branch?.replace(/^refs\/heads\//, "")));
+    const available = knownBranches(repository).filter((item) => !checkedOut.has(item.name));
+    if (!available.length) throw new CliError("Every branch already has a worktree.");
+    branch = await search("Branch to check out", available.map((item) => ({
+      value: item.name,
+      label: item.name,
+      hint: item.local ? "local" : "origin only",
+    })));
+  }
   mkdirSync(options.dir, { recursive: true });
   const existing = branchExists(branch, repository);
   if (!existing.local && !existing.remote) throw new CliError(`Branch '${branch}' does not exist locally or on origin.`);
@@ -174,32 +221,51 @@ export async function checkoutCommand(branch: string, options: ForceOptions & { 
   if (options.shell !== false) openShell(target);
 }
 
-export async function switchCommand(partial: string, options: DirectoryOptions): Promise<void> {
+export async function switchCommand(partial: string | undefined, options: DirectoryOptions): Promise<void> {
   const selected = await resolveWorktree(options.dir, partial);
   ui.info(`Opening ${selected.branch}`);
   openShell(selected.path);
 }
 
-export async function tagCommand(partial: string, tag: string, options: DirectoryOptions): Promise<void> {
+export async function tagCommand(partial: string | undefined, tagArgument: string | undefined, options: DirectoryOptions): Promise<void> {
   const selected = await resolveWorktree(options.dir, partial);
   const tagFile = join(selected.path, ".wt-tags");
-  const tags = existsSync(tagFile)
-    ? readFileSync(tagFile, "utf8").split("\n").map((value) => value.trim()).filter(Boolean)
-    : [];
+  const tags = readTags(selected.path);
+  let tag = tagArgument;
+  if (tag === undefined) {
+    requireTerminal("a tag");
+    const known = [...new Set(managedWorktreePaths(options.dir).flatMap(readTags))].sort();
+    tag = await input(`Tag for '${selected.branch}'`, known.length ? `existing: ${known.join(", ")}` : undefined);
+  }
   if (!tags.includes(tag)) tags.push(tag);
   writeFileSync(tagFile, `${[...new Set(tags)].sort().join("\n")}\n`);
   ui.success(`Tagged '${selected.branch}' as '${tag}'.`);
 }
 
-export async function switchGroupCommand(tag: string, options: DirectoryOptions): Promise<void> {
-  const matches = managedWorktreePaths(options.dir).filter((path) => {
-    const file = join(path, ".wt-tags");
-    return existsSync(file) && readFileSync(file, "utf8").split(/\s+/).includes(tag);
-  });
+function readTags(path: string): string[] {
+  const file = join(path, ".wt-tags");
+  return existsSync(file) ? readFileSync(file, "utf8").split(/\s+/).map((value) => value.trim()).filter(Boolean) : [];
+}
+
+export async function switchGroupCommand(tagArgument: string | undefined, options: DirectoryOptions): Promise<void> {
+  const paths = managedWorktreePaths(options.dir);
+  let tag = tagArgument;
+  if (tag === undefined) {
+    requireTerminal("a tag");
+    const counts = new Map<string, number>();
+    for (const found of paths.flatMap(readTags)) counts.set(found, (counts.get(found) ?? 0) + 1);
+    if (!counts.size) throw new CliError("No worktree has a tag yet. Add one with 'wt tag'.");
+    tag = await search("Pick a tag", [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({
+      value: name,
+      label: name,
+      hint: `${count} worktree${count === 1 ? "" : "s"}`,
+    })));
+  }
+  const matches = paths.filter((path) => readTags(path).includes(tag));
   if (!matches.length) throw new CliError(`No worktree tagged '${tag}'.`);
   const selected = matches.length === 1
     ? matches[0]!
-    : await choose(
+    : await search(
         `Multiple worktrees have tag '${tag}'`,
         matches.map((path) => ({ value: path, label: branchAt(path), hint: path })),
       );
@@ -228,10 +294,80 @@ export async function timeCommand(
 }
 
 export async function deleteCommand(
-  partial: string,
+  partial: string | undefined,
   options: ForceOptions & { dryRun?: boolean; yes?: boolean },
 ): Promise<void> {
-  const selected = await resolveWorktree(options.dir, partial);
+  const matches = findManagedWorktrees(options.dir, partial ?? "");
+  if (!matches.length) throw new CliError(partial === undefined ? "No managed worktrees found." : `No worktree found matching '${partial}'.`);
+  if (matches.length === 1 && partial !== undefined) return deleteOne(matches[0]!, options);
+  if (partial === undefined) requireTerminal("a worktree");
+  else if (!process.stdin.isTTY) throw new CliError(`Multiple worktrees match '${partial}'. Pass a more specific value in non-interactive mode.`);
+
+  const ahead = await aheadCounts(matches);
+  const byProject = new Map<string, Worktree[]>();
+  for (const match of matches) byProject.set(match.project, [...(byProject.get(match.project) ?? []), match]);
+  const chosen = new Set(await chooseMany(
+    "Select worktrees to delete (space toggles, enter confirms)",
+    Object.fromEntries([...byProject].sort(([a], [b]) => a.localeCompare(b)).map(([project, items]) => [project, items.map((item) => ({
+      value: item.path,
+      label: item.branch,
+      hint: [...deletionWarnings(item, ahead.get(item.path)), item.path].join(", "),
+    }))])),
+    [],
+  ));
+  const selected = matches.filter((match) => chosen.has(match.path));
+  if (!selected.length) {
+    ui.info("Nothing selected; no worktrees deleted.");
+    return;
+  }
+  if (selected.length === 1) return deleteOne(selected[0]!, options);
+
+  heading(options.dryRun ? "Deletion preview" : "Delete worktrees");
+  renderTable(["BRANCH", "WARNINGS", "PATH"], selected.map((item) => [
+    item.branch,
+    color.yellow(deletionWarnings(item, ahead.get(item.path)).join(", ")),
+    color.dim(item.path),
+  ]));
+  if (options.dryRun) return;
+  const kept = options.force ? [] : selected.filter((item) => item.dirty);
+  const removable = selected.filter((item) => !kept.includes(item));
+  for (const item of kept) ui.warning(`Keeping ${item.branch}: uncommitted changes. Pass --force to delete it anyway.`);
+  if (!removable.length) return;
+  if (!options.yes && !options.force && !(await confirm(`Delete ${removable.length} worktree${removable.length === 1 ? "" : "s"}?`))) {
+    throw new CliError("Deletion cancelled.", 130);
+  }
+
+  const runner = new SystemAsyncGitRunner();
+  const results = await Promise.all(removable.map(async (item) => {
+    const common = optionalGitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], item.path) ?? item.path;
+    const result = await runner.run({ args: ["worktree", "remove", ...(options.force ? ["--force"] : []), item.path], cwd: common });
+    return { item, result };
+  }));
+  for (const { item, result } of results) {
+    if (result.exitCode === 0) ui.success(`Deleted ${item.branch}`);
+    else ui.warning(`Could not delete ${item.branch}: ${result.stderr.trim() || result.stdout.trim()}`);
+  }
+  if (results.some(({ result }) => result.exitCode !== 0)) process.exitCode = 1;
+}
+
+function deletionWarnings(item: Worktree, ahead: number | undefined): string[] {
+  const warnings: string[] = [];
+  if (item.dirty) warnings.push("uncommitted changes");
+  if (!item.upstream) warnings.push("no upstream");
+  else if (ahead) warnings.push(`${ahead} unpushed`);
+  return warnings;
+}
+
+/** Unpushed commit counts, checked in parallel. */
+async function aheadCounts(items: readonly Worktree[]): Promise<Map<string, number>> {
+  const runner = new SystemAsyncGitRunner();
+  return new Map(await Promise.all(items.filter((item) => item.upstream).map(async (item) => {
+    const result = await runner.run({ args: ["rev-list", "--count", "@{u}..HEAD"], cwd: item.path });
+    return [item.path, result.exitCode === 0 ? Number(result.stdout.trim()) : 0] as const;
+  })));
+}
+
+async function deleteOne(selected: Worktree, options: ForceOptions & { dryRun?: boolean; yes?: boolean }): Promise<void> {
   const upstream = optionalGitText(["rev-parse", "--abbrev-ref", "@{u}"], selected.path);
   const ahead = upstream ? Number(optionalGitText(["rev-list", "--count", `${upstream}..HEAD`], selected.path) ?? "0") : undefined;
   const dirty = hasChanges(selected.path);

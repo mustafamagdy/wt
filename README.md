@@ -97,10 +97,10 @@ wt sg ui
 
 ### Core Commands
 - `wt list | ls | l [pattern] [--current]` - List all worktrees with status (optional pattern filter, --current shows only current repo worktrees)
-- `wt create | new <branch> [base] [--copy <patterns>] [-d <path>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs, optionally override worktree location)
-- `wt checkout | co <branch> [-d <path>]` - Checkout existing branch in worktree
-- `wt switch | sw <partial>` - Switch to worktree by partial branch name
-- `wt delete | rm <partial> [--dry-run] [--yes]` - Delete worktree with a risk preview and confirmation
+- `wt create | new [branch] [base] [--copy <patterns>] [-d <path>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs, optionally override worktree location). With no branch, asks for a name and lets you search for the base
+- `wt checkout | co [branch] [-d <path>]` - Checkout existing branch in worktree. With no branch, search local and origin branches that have no worktree yet
+- `wt switch | sw [partial]` - Switch to worktree by partial branch name. With no name, or several matches, search the list
+- `wt delete | rm [partial] [--dry-run] [--yes] [--force]` - Delete worktree with a risk preview and confirmation. With no name, or several matches, tick several worktrees grouped by repository and delete them in parallel (ones with uncommitted changes are kept unless `--force`)
 
 ### Workflow Commands
 - `wt push` - Commit all changes & push current worktree (creates origin if missing)
@@ -108,9 +108,12 @@ wt sg ui
 - `wt du` - Show disk usage per worktree (with total)
 - `wt clean [--current] [--dry-run] [--dangerous-accept] [--delete-branch] [--no-fetch]` - Remove worktrees whose work is already merged, squash merged, or pushed. Checks run in parallel, results are grouped by repository, and you pick which ones to remove
 
+Missing arguments are only asked for in a terminal. In scripts and CI, a
+missing argument is still an error, so pass it explicitly.
+
 ### Organization Commands
-- `wt tag <partial> <tag>` - Tag a worktree with group label
-- `wt switchg | sg <tag>` - Switch to worktree by tag
+- `wt tag [partial] [tag]` - Tag a worktree with group label. Missing values are asked for
+- `wt switchg | sg [tag]` - Switch to worktree by tag. With no tag, search existing tags
 
 ### Advanced Commands
 - `wt time | tm <branch>@<YYYY-MM-DD>` - Create detached worktree from specific date

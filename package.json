@@ -1,6 +1,6 @@
 {
   "name": "git-wt",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Typed Git worktree management library and interactive CLI",
   "type": "module",
   "main": "./dist/core.js",
@@ -26,7 +26,6 @@
     "test": "bun test",
     "pack:check": "bun pm pack --dry-run",
     "verify": "bun run check && bun test && bun run build && bun run pack:check && bin/wt --help",
-    "postinstall": "echo '\n\u2705 git-wt installed! Run \"wt help\" to get started.\n'",
     "prepublishOnly": "bun run verify"
   },
   "keywords": [

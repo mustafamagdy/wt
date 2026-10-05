@@ -24,7 +24,25 @@ Every mutation returns the registry state before and after the command. The
 runner is injectable for tests and automation. Destructive operations require
 an exact registered path and never recursively delete an arbitrary directory.
 
-Use `wt list --current --json` for machine-readable CLI output.
+Higher-level operations on managed worktrees (the ones the `wt` CLI runs) are
+exported too. They never prompt or print: each returns a plain result or throws
+a `GitWorktreeError` with a stable `code` such as `BRANCH_EXISTS` or
+`TARGET_EXISTS`.
+
+```ts
+import { createWorktree, inspectWorktree, removeWorktree, selectWorktrees, syncWorktree } from "git-wt/core";
+
+const root = "/worktrees";
+const created = createWorktree({ cwd: "/path/to/repository", root, branch: "feature/api", base: "main", copy: [".env"] });
+const [match] = selectWorktrees(root, "feature/api");
+const status = inspectWorktree(created.path); // branch, upstream, ahead, behind, dirty, changes
+syncWorktree(created.path); // rebase onto origin/main, stash and restore local changes
+removeWorktree(created.path);
+```
+
+Use `wt list --current --json` for machine-readable CLI output. For AI agents,
+[`wt-axi`](https://github.com/mustafamagdy/wt-axi) wraps the same operations in
+an agent-friendly CLI.
 
 ## Features
 

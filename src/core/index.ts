@@ -4,3 +4,6 @@ export * from "./model.js";
 export * from "./parser.js";
 export * from "./runner.js";
 export * from "./cleanup.js";
+export * from "./config.js";
+export * from "./worktrees.js";
+export * from "./operations.js";

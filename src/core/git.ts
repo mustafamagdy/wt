@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { CliError } from "./errors.js";
+import { GitWorktreeError } from "./errors.js";
 
 export interface RunOptions {
   cwd?: string;
@@ -22,7 +22,7 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
   });
 
   if (result.error) {
-    throw new CliError(`Unable to run ${command}: ${result.error.message}`);
+    throw new GitWorktreeError(`Unable to run ${command}: ${result.error.message}`, { code: "COMMAND_UNAVAILABLE", command: args, cause: result.error });
   }
 
   const status = result.status ?? 1;
@@ -33,7 +33,7 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
   };
 
   if (status !== 0 && !options.allowFailure) {
-    throw new CliError(output.stderr || output.stdout || `${command} exited with status ${status}`);
+    throw new GitWorktreeError(output.stderr || output.stdout || `${command} exited with status ${status}`, { code: command === "git" ? "GIT_FAILED" : "COMMAND_FAILED", command: args, exitCode: status });
   }
   return output;
 }
@@ -50,9 +50,9 @@ export function gitRaw(args: string[], cwd?: string, allowFailure = false): RunR
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  if (result.error) throw new CliError(`Unable to run git: ${result.error.message}`);
+  if (result.error) throw new GitWorktreeError(`Unable to run git: ${result.error.message}`, { code: "GIT_UNAVAILABLE", command: args, cause: result.error });
   const output = { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status ?? 1 };
-  if (output.status !== 0 && !allowFailure) throw new CliError(output.stderr.trimEnd() || output.stdout.trimEnd() || `git exited with status ${output.status}`);
+  if (output.status !== 0 && !allowFailure) throw new GitWorktreeError(output.stderr.trimEnd() || output.stdout.trimEnd() || `git exited with status ${output.status}`, { code: "GIT_FAILED", command: args, exitCode: output.status });
   return output;
 }
 
@@ -71,7 +71,7 @@ export function optionalGitText(args: string[], cwd?: string): string | undefine
 
 export function requireRepository(cwd = process.cwd()): string {
   const root = optionalGitText(["rev-parse", "--show-toplevel"], cwd);
-  if (!root) throw new CliError("Not inside a Git repository.");
+  if (!root) throw new GitWorktreeError("Not inside a Git repository.", { code: "NOT_A_REPOSITORY" });
   return root;
 }
 

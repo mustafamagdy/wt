@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { git } from "./git.js";
-import { run } from "./git.js";
+import { git } from "./core/git.js";
+import { run } from "./core/git.js";
 
 const cli = fileURLToPath(new URL("cli.ts", import.meta.url));
 const project = dirname(dirname(cli));

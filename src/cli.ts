@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Command, CommanderError } from "commander";
-import { worktreesDirectory } from "./config.js";
+import { worktreesDirectory } from "./core/config.js";
 import {
   checkoutCommand,
   cleanCommand,

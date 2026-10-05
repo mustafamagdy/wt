@@ -1,31 +1,29 @@
 import { spawnSync } from "node:child_process";
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  realpathSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import fg from "fast-glob";
+import { basename } from "node:path";
 import { analyzeCleanup, executeCleanup, type CleanCandidate } from "./core/cleanup.js";
-import { SystemAsyncGitRunner } from "./core/runner.js";
-import { parseWorktreePorcelain } from "./core/parser.js";
-import { folderFromBranch } from "./config.js";
-import { CliError } from "./errors.js";
-import { branchAt, git, gitOk, gitRaw, hasChanges, optionalGitText, requireRepository } from "./git.js";
-import { chooseMany, color, confirm, heading, input, renderTable, search, spinner, ui } from "./ui.js";
+import { GitWorktreeError } from "./core/errors.js";
+import { branchAt, git, gitRaw, optionalGitText, requireRepository } from "./core/git.js";
 import {
-  branchExists,
-  directorySize,
-  findManagedWorktrees,
-  formatBytes,
-  listWorktrees,
-  managedWorktreePaths,
-  registeredWorktreePaths,
-  type Worktree,
-} from "./worktrees.js";
+  addTag,
+  checkoutWorktree,
+  commitAndPush,
+  createWorktree,
+  diskUsage,
+  hasUncommittedChanges,
+  inspectWorktree,
+  originUrl,
+  removeWorktree,
+  removeWorktrees,
+  syncWorktree,
+  tagCounts,
+  timeWorktree,
+  unpushedCounts,
+  worktreesWithTag,
+} from "./core/operations.js";
+import { parseWorktreePorcelain } from "./core/parser.js";
+import { findManagedWorktrees, formatBytes, listWorktrees, managedWorktreePaths, type Worktree } from "./core/worktrees.js";
+import { CliError } from "./errors.js";
+import { chooseMany, color, confirm, heading, input, renderTable, search, spinner, ui } from "./ui.js";
 
 export interface DirectoryOptions {
   dir: string;
@@ -56,6 +54,19 @@ function requireTerminal(what: string): void {
   if (!process.stdin.isTTY) throw new CliError(`Missing ${what}. Pass it as an argument, or run in a terminal to pick one.`);
 }
 
+/** Add a CLI-specific next step to core errors with the given codes. */
+function withHints<T>(action: () => T, hints: Record<string, string>): T {
+  try {
+    return action();
+  } catch (error) {
+    const hint = error instanceof GitWorktreeError ? hints[error.code] : undefined;
+    if (hint) throw new CliError(`${(error as Error).message} ${hint}`);
+    throw error;
+  }
+}
+
+const replaceHint = { TARGET_EXISTS: "Use --force to replace it." };
+
 /** Branches that exist locally or on origin, local first. */
 function knownBranches(repository: string): Array<{ name: string; local: boolean }> {
   const refs = git(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"], repository).stdout
@@ -72,24 +83,6 @@ function openShell(cwd: string): void {
   const shell = process.env.SHELL || (process.platform === "win32" ? "cmd.exe" : "/bin/sh");
   const result = spawnSync(shell, [], { cwd, stdio: "inherit" });
   if (result.error) throw new CliError(`Unable to open ${shell}: ${result.error.message}`);
-}
-
-function removeTarget(root: string, target: string, force: boolean): void {
-  if (!existsSync(target)) return;
-  const registered = registeredWorktreePaths(root).some((path) => samePath(path, target));
-  if (!registered) {
-    throw new CliError(`Refusing to delete an unregistered directory: ${target}. Move it away first.`);
-  }
-  const args = ["worktree", "remove"];
-  if (force) args.push("--force");
-  args.push(target);
-  git(args, root);
-  if (existsSync(target)) throw new CliError(`Git removed the registration but the directory still exists: ${target}`);
-}
-
-function samePath(left: string, right: string): boolean {
-  const canonical = (path: string) => existsSync(path) ? realpathSync.native(path) : resolve(path);
-  return canonical(left) === canonical(right);
 }
 
 export async function listCommand(
@@ -134,54 +127,19 @@ export async function createCommand(
     ]);
     base = picked || undefined;
   }
-  mkdirSync(options.dir, { recursive: true });
-  const existing = branchExists(branch, repository);
-  if (existing.local) throw new CliError(`Branch '${branch}' already exists. Use 'wt checkout ${branch}'.`);
-
-  let baseRef = base;
-  if (base) {
-    const baseExists = branchExists(base, repository);
-    if (!baseExists.local && !baseExists.remote) throw new CliError(`Base branch '${base}' does not exist locally or on origin.`);
-    if (!baseExists.local) baseRef = `origin/${base}`;
+  const created = withHints(() => createWorktree({
+    root: options.dir,
+    branch,
+    ...(base ? { base } : {}),
+    ...(options.force ? { force: true } : {}),
+    ...(options.copy ? { copy: options.copy.split(",") } : {}),
+  }), { ...replaceHint, BRANCH_EXISTS: `Use 'wt checkout ${branch}'.` });
+  for (const copied of created.copied) {
+    if (!copied.count) ui.warning(`No files match '${copied.pattern}'; skipped.`);
+    else ui.success(`Copied ${copied.count} item${copied.count === 1 ? "" : "s"} matching '${copied.pattern}'.`);
   }
-
-  const target = join(options.dir, folderFromBranch(branch));
-  if (existsSync(target) && !options.force) throw new CliError(`Folder already exists: ${target}. Use --force to replace it.`);
-  removeTarget(repository, target, Boolean(options.force));
-
-  const args = ["worktree", "add", "-b", branch, target];
-  if (baseRef) args.push(baseRef);
-  git(args, repository);
-  if (options.copy) copyPatterns(repository, target, options.copy);
-  ui.success(`Worktree ready at ${target}`);
-  if (options.shell !== false) openShell(target);
-}
-
-function copyPatterns(repository: string, target: string, patterns: string): void {
-  for (const pattern of patterns.split(",").map((value) => value.trim()).filter(Boolean)) {
-    const matches = fg.sync(pattern, {
-      cwd: repository,
-      dot: true,
-      onlyFiles: false,
-      followSymbolicLinks: false,
-      unique: true,
-      ignore: [".git", ".git/**"],
-    });
-    if (!matches.length) {
-      ui.warning(`No files match '${pattern}'; skipped.`);
-      continue;
-    }
-    for (const relative of matches) {
-      const source = resolve(repository, relative);
-      const destination = resolve(target, relative);
-      if (!source.startsWith(`${resolve(repository)}/`) || !destination.startsWith(`${resolve(target)}/`)) {
-        throw new CliError(`Copy pattern escaped the repository: ${relative}`);
-      }
-      mkdirSync(dirname(destination), { recursive: true });
-      cpSync(source, destination, { recursive: true, dereference: false, force: true });
-    }
-    ui.success(`Copied ${matches.length} item${matches.length === 1 ? "" : "s"} matching '${pattern}'.`);
-  }
+  ui.success(`Worktree ready at ${created.path}`);
+  if (options.shell !== false) openShell(created.path);
 }
 
 export async function checkoutCommand(branchArgument: string | undefined, options: ForceOptions & { shell?: boolean }): Promise<void> {
@@ -199,26 +157,12 @@ export async function checkoutCommand(branchArgument: string | undefined, option
       hint: item.local ? "local" : "origin only",
     })));
   }
-  mkdirSync(options.dir, { recursive: true });
-  const existing = branchExists(branch, repository);
-  if (!existing.local && !existing.remote) throw new CliError(`Branch '${branch}' does not exist locally or on origin.`);
-  const target = join(options.dir, folderFromBranch(branch));
-
-  if (existsSync(`${target}/.git`)) {
-    const registered = registeredWorktreePaths(repository).some((path) => samePath(path, target));
-    if (!registered) throw new CliError(`Refusing to use an unregistered Git directory: ${target}. Move it away first.`);
-    if (branchAt(target) !== branch) throw new CliError(`Registered worktree at ${target} has branch '${branchAt(target)}', not '${branch}'.`);
-    ui.success(`Using existing worktree at ${target}`);
-  } else {
-    if (existsSync(target) && !options.force) throw new CliError(`Folder already exists: ${target}. Use --force to replace it.`);
-    if (existsSync(target)) throw new CliError(`Refusing to delete an unregistered directory: ${target}. Move it away first.`);
-    const args = ["worktree", "add"];
-    if (!existing.local && existing.remote) args.push("-b", branch);
-    args.push(target, existing.local ? branch : `origin/${branch}`);
-    git(args, repository);
-    ui.success(`Worktree ready at ${target}`);
-  }
-  if (options.shell !== false) openShell(target);
+  const result = withHints(
+    () => checkoutWorktree({ root: options.dir, branch, ...(options.force ? { force: true } : {}) }),
+    replaceHint,
+  );
+  ui.success(result.reused ? `Using existing worktree at ${result.path}` : `Worktree ready at ${result.path}`);
+  if (options.shell !== false) openShell(result.path);
 }
 
 export async function switchCommand(partial: string | undefined, options: DirectoryOptions): Promise<void> {
@@ -229,39 +173,29 @@ export async function switchCommand(partial: string | undefined, options: Direct
 
 export async function tagCommand(partial: string | undefined, tagArgument: string | undefined, options: DirectoryOptions): Promise<void> {
   const selected = await resolveWorktree(options.dir, partial);
-  const tagFile = join(selected.path, ".wt-tags");
-  const tags = readTags(selected.path);
   let tag = tagArgument;
   if (tag === undefined) {
     requireTerminal("a tag");
-    const known = [...new Set(managedWorktreePaths(options.dir).flatMap(readTags))].sort();
+    const known = [...tagCounts(options.dir).keys()];
     tag = await input(`Tag for '${selected.branch}'`, known.length ? `existing: ${known.join(", ")}` : undefined);
   }
-  if (!tags.includes(tag)) tags.push(tag);
-  writeFileSync(tagFile, `${[...new Set(tags)].sort().join("\n")}\n`);
+  addTag(selected.path, tag);
   ui.success(`Tagged '${selected.branch}' as '${tag}'.`);
 }
 
-function readTags(path: string): string[] {
-  const file = join(path, ".wt-tags");
-  return existsSync(file) ? readFileSync(file, "utf8").split(/\s+/).map((value) => value.trim()).filter(Boolean) : [];
-}
-
 export async function switchGroupCommand(tagArgument: string | undefined, options: DirectoryOptions): Promise<void> {
-  const paths = managedWorktreePaths(options.dir);
   let tag = tagArgument;
   if (tag === undefined) {
     requireTerminal("a tag");
-    const counts = new Map<string, number>();
-    for (const found of paths.flatMap(readTags)) counts.set(found, (counts.get(found) ?? 0) + 1);
+    const counts = tagCounts(options.dir);
     if (!counts.size) throw new CliError("No worktree has a tag yet. Add one with 'wt tag'.");
-    tag = await search("Pick a tag", [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([name, count]) => ({
+    tag = await search("Pick a tag", [...counts].map(([name, count]) => ({
       value: name,
       label: name,
       hint: `${count} worktree${count === 1 ? "" : "s"}`,
     })));
   }
-  const matches = paths.filter((path) => readTags(path).includes(tag));
+  const matches = worktreesWithTag(options.dir, tag);
   if (!matches.length) throw new CliError(`No worktree tagged '${tag}'.`);
   const selected = matches.length === 1
     ? matches[0]!
@@ -278,19 +212,14 @@ export async function timeCommand(
 ): Promise<void> {
   const separator = specification.lastIndexOf("@");
   if (separator <= 0) throw new CliError("Format must be <branch>@<YYYY-MM-DD>.");
-  const branch = specification.slice(0, separator);
-  const date = specification.slice(separator + 1);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new CliError("Date must use YYYY-MM-DD format.");
-  const repository = requireRepository();
-  const commit = optionalGitText(["rev-list", "-n", "1", `--before=${date} 23:59`, branch], repository);
-  if (!commit) throw new CliError(`No commit on '${branch}' before ${date}.`);
-  mkdirSync(options.dir, { recursive: true });
-  const target = join(options.dir, folderFromBranch(`${branch}-${date}`));
-  if (existsSync(target) && !options.force) throw new CliError(`Folder already exists: ${target}. Use --force to replace it.`);
-  removeTarget(repository, target, Boolean(options.force));
-  git(["worktree", "add", "--detach", target, commit], repository);
-  ui.success(`Time-machine worktree created at ${target} (${commit.slice(0, 7)}).`);
-  if (options.shell !== false) openShell(target);
+  const result = withHints(() => timeWorktree({
+    root: options.dir,
+    branch: specification.slice(0, separator),
+    date: specification.slice(separator + 1),
+    ...(options.force ? { force: true } : {}),
+  }), replaceHint);
+  ui.success(`Time-machine worktree created at ${result.path} (${result.commit.slice(0, 7)}).`);
+  if (options.shell !== false) openShell(result.path);
 }
 
 export async function deleteCommand(
@@ -303,7 +232,7 @@ export async function deleteCommand(
   if (partial === undefined) requireTerminal("a worktree");
   else if (!process.stdin.isTTY) throw new CliError(`Multiple worktrees match '${partial}'. Pass a more specific value in non-interactive mode.`);
 
-  const ahead = await aheadCounts(matches);
+  const ahead = await unpushedCounts(matches);
   const byProject = new Map<string, Worktree[]>();
   for (const match of matches) byProject.set(match.project, [...(byProject.get(match.project) ?? []), match]);
   const chosen = new Set(await chooseMany(
@@ -337,17 +266,13 @@ export async function deleteCommand(
     throw new CliError("Deletion cancelled.", 130);
   }
 
-  const runner = new SystemAsyncGitRunner();
-  const results = await Promise.all(removable.map(async (item) => {
-    const common = optionalGitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], item.path) ?? item.path;
-    const result = await runner.run({ args: ["worktree", "remove", ...(options.force ? ["--force"] : []), item.path], cwd: common });
-    return { item, result };
-  }));
-  for (const { item, result } of results) {
-    if (result.exitCode === 0) ui.success(`Deleted ${item.branch}`);
-    else ui.warning(`Could not delete ${item.branch}: ${result.stderr.trim() || result.stdout.trim()}`);
+  const results = await removeWorktrees(removable.map((item) => item.path), { force: Boolean(options.force) });
+  for (const result of results) {
+    const branch = removable.find((item) => item.path === result.path)!.branch;
+    if (result.ok) ui.success(`Deleted ${branch}`);
+    else ui.warning(`Could not delete ${branch}: ${result.error}`);
   }
-  if (results.some(({ result }) => result.exitCode !== 0)) process.exitCode = 1;
+  if (results.some((result) => !result.ok)) process.exitCode = 1;
 }
 
 function deletionWarnings(item: Worktree, ahead: number | undefined): string[] {
@@ -358,47 +283,28 @@ function deletionWarnings(item: Worktree, ahead: number | undefined): string[] {
   return warnings;
 }
 
-/** Unpushed commit counts, checked in parallel. */
-async function aheadCounts(items: readonly Worktree[]): Promise<Map<string, number>> {
-  const runner = new SystemAsyncGitRunner();
-  return new Map(await Promise.all(items.filter((item) => item.upstream).map(async (item) => {
-    const result = await runner.run({ args: ["rev-list", "--count", "@{u}..HEAD"], cwd: item.path });
-    return [item.path, result.exitCode === 0 ? Number(result.stdout.trim()) : 0] as const;
-  })));
-}
-
 async function deleteOne(selected: Worktree, options: ForceOptions & { dryRun?: boolean; yes?: boolean }): Promise<void> {
-  const upstream = optionalGitText(["rev-parse", "--abbrev-ref", "@{u}"], selected.path);
-  const ahead = upstream ? Number(optionalGitText(["rev-list", "--count", `${upstream}..HEAD`], selected.path) ?? "0") : undefined;
-  const dirty = hasChanges(selected.path);
-  const size = formatBytes(directorySize(selected.path));
+  const status = inspectWorktree(selected.path, { size: true });
 
   heading(options.dryRun ? "Deletion preview" : "Delete worktree");
   console.log(`${color.dim("Path")}     ${selected.path}`);
   console.log(`${color.dim("Branch")}   ${selected.branch}`);
-  console.log(`${color.dim("Size")}     ${size}`);
-  if (dirty) ui.warning("The worktree has uncommitted changes.");
-  if (!upstream) ui.warning("The branch has no upstream.");
-  else if (ahead) ui.warning(`The branch has ${ahead} unpushed commit${ahead === 1 ? "" : "s"}.`);
+  console.log(`${color.dim("Size")}     ${formatBytes(status.size ?? 0)}`);
+  if (status.dirty) ui.warning("The worktree has uncommitted changes.");
+  if (!status.upstream) ui.warning("The branch has no upstream.");
+  else if (status.ahead) ui.warning(`The branch has ${status.ahead} unpushed commit${status.ahead === 1 ? "" : "s"}.`);
   if (options.dryRun) return;
 
   if (!options.yes && !options.force) {
     const approved = await confirm(`Delete '${selected.branch}' and its worktree?`);
     if (!approved) throw new CliError("Deletion cancelled.", 130);
   }
-  const repository = registeredWorktreePaths(selected.path)[0];
-  if (!repository) throw new CliError("Git did not report a primary worktree for this repository.");
-  const args = ["worktree", "remove"];
-  if (options.force) args.push("--force");
-  args.push(selected.path);
-  git(args, repository);
+  removeWorktree(selected.path, { force: Boolean(options.force) });
   ui.success(`Deleted worktree ${selected.path}`);
 }
 
 export async function duCommand(options: DirectoryOptions): Promise<void> {
-  const rows = managedWorktreePaths(options.dir)
-    .map((path) => ({ path, size: directorySize(path) }))
-    .sort((a, b) => b.size - a.size);
+  const rows = diskUsage(options.dir);
   heading("Managed worktree disk usage");
   if (!rows.length) {
     ui.info("No managed worktrees found.");
@@ -419,56 +325,33 @@ export async function syncCommand(partial: string | undefined, options: Director
     query = current;
   }
   const selected = await resolveWorktree(options.dir, query);
-  const candidates = ["refs/remotes/origin/main", "refs/remotes/origin/master", "refs/heads/main", "refs/heads/master"];
-  const found = candidates.find((ref) => gitOk(["show-ref", "--verify", "--quiet", ref], selected.path));
-  if (!found) throw new CliError("No main or master branch exists locally or on origin.");
-  const target = found.replace("refs/remotes/", "").replace("refs/heads/", "");
-  if (target.startsWith("origin/")) {
-    ui.info("Fetching origin…");
-    git(["fetch", "origin"], selected.path);
-  }
-
-  const dirty = hasChanges(selected.path);
-  if (dirty) {
-    ui.info("Stashing local changes…");
-    git(["stash", "push", "--include-untracked", "-m", `wt sync auto-stash ${new Date().toISOString()}`], selected.path);
-  }
-  ui.info(`Rebasing ${selected.branch} onto ${target}…`);
-  const rebase = git(["rebase", target], selected.path, true);
-  if (rebase.status !== 0) {
-    git(["rebase", "--abort"], selected.path, true);
-    ui.warning("Rebase failed; attempting a merge.");
-    git(["merge", target], selected.path);
-  }
-  if (dirty) {
-    const restored = git(["stash", "pop"], selected.path, true);
-    if (restored.status !== 0) ui.warning("The sync succeeded, but the stash could not be restored automatically.");
-  }
-  ui.success(`Synced ${selected.branch} with ${target}.`);
+  const result = syncWorktree(selected.path, {
+    onStep: (step, detail) => {
+      if (step === "fetch") ui.info("Fetching origin…");
+      else if (step === "stash") ui.info("Stashing local changes…");
+      else if (step === "rebase") ui.info(`Rebasing ${detail}…`);
+      else ui.warning("Rebase failed; attempting a merge.");
+    },
+  });
+  if (!result.stashRestored) ui.warning("The sync succeeded, but the stash could not be restored automatically.");
+  ui.success(`Synced ${result.branch} with ${result.target}.`);
 }
 
 export async function pushCommand(options: { message?: string }): Promise<void> {
   const repository = requireRepository();
-  if (hasChanges(repository)) {
-    const message = options.message ?? (await input("Commit message"));
-    git(["add", "-A"], repository);
-    git(["commit", "-m", message], repository);
-  } else {
-    ui.info("Nothing to commit.");
-  }
-  const branch = branchAt(repository);
-  if (branch === "HEAD") throw new CliError("Cannot push a detached HEAD.");
-  if (!optionalGitText(["remote", "get-url", "origin"], repository)) {
-    const name = basename(repository);
+  let message = options.message;
+  if (hasUncommittedChanges(repository)) message ??= await input("Commit message");
+  else ui.info("Nothing to commit.");
+  let origin: string | undefined;
+  if (!originUrl(repository) && branchAt(repository) !== "HEAD") {
     const owner = optionalGitText(["config", "--get", "github.user"], repository)
       ?? optionalGitText(["config", "--get", "user.name"], repository)
       ?? "USERNAME";
-    const suggested = `https://github.com/${owner}/${name}.git`;
-    const url = await input("Origin URL", suggested);
-    git(["remote", "add", "origin", url || suggested], repository);
+    const suggested = `https://github.com/${owner}/${basename(repository)}.git`;
+    origin = (await input("Origin URL", suggested)) || suggested;
   }
-  git(["push", "-u", "origin", branch], repository);
-  ui.success(`Pushed ${branch} to origin.`);
+  const result = commitAndPush({ cwd: repository, ...(message ? { message } : {}), ...(origin ? { originUrl: origin } : {}) });
+  ui.success(`Pushed ${result.branch} to origin.`);
 }
 
 export interface CleanOptions extends DirectoryOptions {

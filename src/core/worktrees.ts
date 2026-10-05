@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
-import { parseWorktreePorcelain } from "./core/parser.js";
+import { parseWorktreePorcelain } from "./parser.js";
 import { branchAt, git, gitOk, gitRaw, optionalGitText, requireRepository } from "./git.js";
 
 export interface Worktree {

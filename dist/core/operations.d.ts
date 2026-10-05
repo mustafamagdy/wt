@@ -65,8 +65,12 @@ export declare function timeWorktree(options: TimeWorktreeOptions): TimeWorktree
  * Worktrees in the managed directory chosen by a selector. An exact branch,
  * folder name, or path wins; otherwise branches containing the selector
  * (case-insensitive) match. Callers decide what to do with several matches.
+ * Pass `repository` (any path inside it) to also consider every worktree
+ * registered to that repository, wherever it lives.
  */
-export declare function selectWorktrees(root: string, selector: string): Worktree[];
+export declare function selectWorktrees(root: string, selector: string, options?: {
+    repository?: string;
+}): Worktree[];
 export interface WorktreeStatus {
     path: string;
     branch: string;
@@ -110,6 +114,8 @@ export interface SyncResult {
     /** Branch synced onto, such as `origin/main`. */
     target: string;
     fetched: boolean;
+    /** False when the worktree already contained the target and HEAD did not move. */
+    updated: boolean;
     method: "rebase" | "merge";
     stashed: boolean;
     /** False when stashed changes could not be restored and remain in the stash. */

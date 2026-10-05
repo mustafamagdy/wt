@@ -201,9 +201,17 @@ export function timeWorktree(options: TimeWorktreeOptions): TimeWorktreeResult {
  * Worktrees in the managed directory chosen by a selector. An exact branch,
  * folder name, or path wins; otherwise branches containing the selector
  * (case-insensitive) match. Callers decide what to do with several matches.
+ * Pass `repository` (any path inside it) to also consider every worktree
+ * registered to that repository, wherever it lives.
  */
-export function selectWorktrees(root: string, selector: string): Worktree[] {
-  const all = managedWorktreePaths(root)
+export function selectWorktrees(root: string, selector: string, options: { repository?: string } = {}): Worktree[] {
+  const paths = managedWorktreePaths(root);
+  if (options.repository) {
+    for (const path of registeredWorktreePaths(options.repository)) {
+      if (!paths.some((known) => samePath(known, path))) paths.push(path);
+    }
+  }
+  const all = paths
     .map((path) => describeWorktree(path))
     .filter((item): item is Worktree => Boolean(item));
   const exact = all.filter((item) => item.branch === selector || basename(item.path) === selector || samePath(item.path, resolve(selector)));
@@ -296,6 +304,8 @@ export interface SyncResult {
   /** Branch synced onto, such as `origin/main`. */
   target: string;
   fetched: boolean;
+  /** False when the worktree already contained the target and HEAD did not move. */
+  updated: boolean;
   method: "rebase" | "merge";
   stashed: boolean;
   /** False when stashed changes could not be restored and remain in the stash. */
@@ -323,16 +333,24 @@ export function syncWorktree(path: string, options: { onStep?: (step: SyncStep, 
     options.onStep?.("stash", "local changes");
     git(["stash", "push", "--include-untracked", "-m", `wt sync auto-stash ${new Date().toISOString()}`], path);
   }
+  const before = git(["rev-parse", "HEAD"], path).stdout;
   options.onStep?.("rebase", `${branch} onto ${target}`);
   let method: SyncResult["method"] = "rebase";
   if (git(["rebase", target], path, true).status !== 0) {
     git(["rebase", "--abort"], path, true);
     options.onStep?.("merge", target);
     method = "merge";
-    git(["merge", target], path);
+    if (git(["merge", target], path, true).status !== 0) {
+      throw new GitWorktreeError(
+        `Merging ${target} into ${branch} stopped with conflicts in ${path}. Resolve them and commit, or run 'git merge --abort'.`
+          + (stashed ? " Your local changes are saved in the stash." : ""),
+        { code: "SYNC_CONFLICT" },
+      );
+    }
   }
+  const updated = git(["rev-parse", "HEAD"], path).stdout !== before;
   const stashRestored = stashed ? git(["stash", "pop"], path, true).status === 0 : true;
-  return { path, branch, target, fetched, method, stashed, stashRestored };
+  return { path, branch, target, fetched, updated, method, stashed, stashRestored };
 }
 
 export function readTags(path: string): string[] {

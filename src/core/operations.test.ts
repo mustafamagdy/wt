@@ -105,10 +105,32 @@ describe("core operations", () => {
 
     const steps: string[] = [];
     const result = syncWorktree(path, { onStep: (step) => steps.push(step) });
-    expect(result).toEqual({ path, branch: "feature/sync", target: "main", fetched: false, method: "rebase", stashed: true, stashRestored: true });
+    expect(result).toEqual({ path, branch: "feature/sync", target: "main", fetched: false, updated: true, method: "rebase", stashed: true, stashRestored: true });
     expect(steps).toEqual(["stash", "rebase"]);
     expect(existsSync(join(path, "upstream.txt"))).toBe(true);
     expect(existsSync(join(path, "local.txt"))).toBe(true);
+    expect(syncWorktree(path)).toMatchObject({ updated: false, stashed: true });
+  });
+
+  test("reports sync conflicts with a code and keeps local changes stashed", () => {
+    const { repository, root } = fixture();
+    const { path } = createWorktree({ cwd: repository, root, branch: "feature/conflict" });
+    writeFileSync(join(path, "tracked.txt"), "mine\n");
+    git(["commit", "-qam", "mine"], path);
+    writeFileSync(join(repository, "tracked.txt"), "theirs\n");
+    git(["commit", "-qam", "theirs"], repository);
+    writeFileSync(join(path, "wip.txt"), "wip\n");
+    expect(errorCode(() => syncWorktree(path))).toBe("SYNC_CONFLICT");
+    expect(git(["stash", "list"], path).stdout).toContain("wt sync auto-stash");
+  });
+
+  test("selects worktrees registered to a repository outside the managed directory", () => {
+    const { repository, root } = fixture();
+    const outside = join(repository, "..", "outside");
+    git(["worktree", "add", "-q", "-b", "elsewhere", outside], repository);
+    expect(selectWorktrees(root, "elsewhere")).toEqual([]);
+    expect(selectWorktrees(root, "elsewhere", { repository }).map((item) => item.branch)).toEqual(["elsewhere"]);
+    expect(selectWorktrees(root, "main", { repository }).map((item) => item.branch)).toEqual(["main"]);
   });
 
   test("validates time-machine dates and push prerequisites", () => {

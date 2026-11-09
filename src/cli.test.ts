@@ -24,6 +24,17 @@ function fixture(): { repository: string; managed: string } {
   return { repository, managed };
 }
 
+function withManagedDirectory<T>(managed: string, action: () => T): T {
+  const previous = process.env.WT_WORKTREES_DIR;
+  process.env.WT_WORKTREES_DIR = managed;
+  try {
+    return action();
+  } finally {
+    if (previous === undefined) delete process.env.WT_WORKTREES_DIR;
+    else process.env.WT_WORKTREES_DIR = previous;
+  }
+}
+
 function wt(args: string[], cwd: string) {
   return run("bun", [cli, ...args], { cwd, allowFailure: true });
 }
@@ -76,6 +87,49 @@ describe("CLI", () => {
     const result = wt(["list", "--current", "external", "--dir", managed], outside);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(outside);
+  });
+
+  test("lists the current repository from Git by default inside a repository", () => {
+    const { repository, managed } = fixture();
+    const outside = join(dirname(repository), "elsewhere");
+    git(["branch", "external"], repository);
+    git(["worktree", "add", "-q", outside, "external"], repository);
+    const result = withManagedDirectory(managed, () => wt(["list"], repository));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("Current repository worktrees");
+    expect(result.stdout).toContain(outside);
+  });
+
+  test("lists worktrees of every known repository with --all and outside a repository", () => {
+    const first = fixture();
+    const second = fixture();
+    git(["branch", "managed-one"], first.repository);
+    git(["worktree", "add", "-q", join(second.managed, "managed-one"), "managed-one"], first.repository);
+    const firstOutside = join(dirname(first.repository), "first-outside");
+    git(["branch", "first-external"], first.repository);
+    git(["worktree", "add", "-q", firstOutside, "first-external"], first.repository);
+    const secondOutside = join(dirname(second.repository), "second-outside");
+    git(["branch", "second-external"], second.repository);
+    git(["worktree", "add", "-q", secondOutside, "second-external"], second.repository);
+
+    const all = withManagedDirectory(second.managed, () => wt(["list", "--all", "--json"], second.repository));
+    expect(all.status).toBe(0);
+    const paths = (JSON.parse(all.stdout) as Array<{ path: string }>).map((item) => item.path);
+    expect(paths).toContain(join(second.managed, "managed-one"));
+    expect(paths).toContain(firstOutside);
+    expect(paths).toContain(secondOutside);
+    expect(new Set(paths).size).toBe(paths.length);
+
+    const outsideRepository = withManagedDirectory(second.managed, () => wt(["list"], dirname(second.managed)));
+    expect(outsideRepository.stdout).toContain("All worktrees");
+    expect(outsideRepository.stdout).toContain(firstOutside);
+  });
+
+  test("rejects --current together with --all", () => {
+    const { repository } = fixture();
+    const result = wt(["list", "--current", "--all"], repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("either --current or --all");
   });
 
   test("prints machine-readable JSON without UI text", () => {

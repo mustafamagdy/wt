@@ -22,7 +22,8 @@ wt <command> --help
 
 - **Managed directory**: `~/.worktrees` by default. Override per command with `-d, --dir <path>` or globally with `WT_WORKTREES_DIR`. Most commands only look here.
 - A worktree folder is named after its branch with `/` replaced by `-`: branch `feature/login` lives in `~/.worktrees/feature-login`.
-- `--current` (on `list` and `clean`) means "every worktree registered to the repository I am in", including ones outside the managed directory.
+- `--current` (on `list` and `clean`) means "every worktree registered to the repository I am in", including ones outside the managed directory. Inside a repository this is what plain `wt list` shows.
+- `wt list --all` shows worktrees of the current repository plus every repository with a worktree in the managed directory. Outside a repository, plain `wt list` does the same. `wt list -d <path>` lists only that directory.
 
 ## Rules for agents
 
@@ -30,13 +31,13 @@ You run without an interactive terminal. `wt` is built for both humans and scrip
 
 1. **Always pass every argument.** In a terminal, a missing branch or name opens a picker. Without one, it fails with `Missing ... Pass it as an argument`. Several matches for a partial name also fail without a terminal; pass a more specific name.
 2. **Always pass `--no-shell`** to `create`, `checkout`, and `time`. Otherwise they try to open a shell inside the new worktree.
-3. **Do not use `switch` or `switch-group`.** They only open a shell. To work in a worktree, find its path with `wt list --json` and use that path as your working directory.
+3. **Do not use `switch` or `switch-group`.** They only open a shell. To work in a worktree, find its path with `wt list --json` (or `wt list --all --json` for another repository) and use that path as your working directory.
 4. **Destructive commands need explicit flags** because confirmation prompts answer "no" without a terminal. Only add these flags after the user has agreed to the removal:
    - `delete` needs `--yes`, and `--force` to also discard uncommitted changes.
    - `clean` needs `--dangerous-accept`.
    - `sync` with no name needs `--yes`.
 5. **Preview first.** `delete --dry-run` and `clean --dry-run` change nothing and show exactly what would go. Show the user the result before running the real command.
-6. **Read state as JSON.** Use `wt list --json` (managed directory) or `wt list --current --json` (this repository). Do not parse the human tables.
+6. **Read state as JSON.** Use `wt list --json` (this repository) or `wt list --all --json` (every known repository). Do not parse the human tables.
 
 ## Commands
 
@@ -44,7 +45,7 @@ Partial names match branch names by case-insensitive substring.
 
 | Goal | Command |
 | --- | --- |
-| List worktrees as JSON | `wt list --json` or `wt list --current --json` |
+| List worktrees as JSON | `wt list --json` (this repository) or `wt list --all --json` |
 | New branch plus worktree | `wt create <branch> [base] --no-shell` |
 | Copy untracked files into a new worktree | `wt create <branch> --copy ".env,.env.local" --no-shell` |
 | Existing local or origin branch in a worktree | `wt checkout <branch> --no-shell` |

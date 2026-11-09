@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { parseWorktreePorcelain } from "./core/parser.js";
 import { branchAt, git, gitOk, gitRaw, optionalGitText, requireRepository } from "./git.js";
 
@@ -50,10 +50,35 @@ export function describeWorktree(path: string, projectOverride?: string): Worktr
   };
 }
 
-export function listWorktrees(options: { root: string; current: boolean; pattern?: string; cwd?: string }): Worktree[] {
+export type ListScope = "repository" | "all" | "managed";
+
+/** Git registrations of the current repository plus every repository with a worktree in the managed directory. */
+export function allWorktreePaths(root: string, cwd = process.cwd()): string[] {
+  const managed = managedWorktreePaths(root);
+  const anchors = new Map<string, string>();
+  const current = optionalGitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], cwd);
+  if (current) anchors.set(current, cwd);
+  for (const path of managed) {
+    const common = optionalGitText(["rev-parse", "--path-format=absolute", "--git-common-dir"], path);
+    if (common && !anchors.has(common)) anchors.set(common, path);
+  }
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const path of [...[...anchors.values()].flatMap((anchor) => registeredWorktreePaths(anchor)), ...managed]) {
+    const key = existsSync(path) ? realpathSync.native(path) : resolve(path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(path);
+  }
+  return paths;
+}
+
+export function listWorktrees(options: { root: string; scope: ListScope; pattern?: string; cwd?: string }): Worktree[] {
   const cwd = options.cwd ?? process.cwd();
-  const project = options.current ? repositoryName(cwd) : undefined;
-  const paths = options.current ? registeredWorktreePaths(cwd) : managedWorktreePaths(options.root);
+  const project = options.scope === "repository" ? repositoryName(cwd) : undefined;
+  const paths = options.scope === "repository"
+    ? registeredWorktreePaths(cwd)
+    : options.scope === "all" ? allWorktreePaths(options.root, cwd) : managedWorktreePaths(options.root);
   const pattern = options.pattern?.toLowerCase();
   return paths
     .map((path) => describeWorktree(path, project))

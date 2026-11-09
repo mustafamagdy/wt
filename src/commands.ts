@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import type { Command } from "commander";
 import fg from "fast-glob";
 import { analyzeCleanup, executeCleanup, type CleanCandidate } from "./core/cleanup.js";
 import { SystemAsyncGitRunner } from "./core/runner.js";
@@ -22,6 +23,7 @@ import {
   findManagedWorktrees,
   formatBytes,
   listWorktrees,
+  type ListScope,
   managedWorktreePaths,
   registeredWorktreePaths,
   type Worktree,
@@ -94,14 +96,20 @@ function samePath(left: string, right: string): boolean {
 
 export async function listCommand(
   pattern: string | undefined,
-  options: DirectoryOptions & { current?: boolean; json?: boolean },
+  options: DirectoryOptions & { current?: boolean; all?: boolean; json?: boolean },
+  command: Command,
 ): Promise<void> {
-  const items = listWorktrees({ root: options.dir, current: Boolean(options.current), ...(pattern ? { pattern } : {}) });
+  if (options.current && options.all) throw new CliError("Use either --current or --all, not both.");
+  const scope: ListScope = options.current ? "repository"
+    : options.all ? "all"
+    : command.getOptionValueSource("dir") !== "default" ? "managed"
+    : gitOk(["rev-parse", "--is-inside-work-tree"]) ? "repository" : "all";
+  const items = listWorktrees({ root: options.dir, scope, ...(pattern ? { pattern } : {}) });
   if (options.json) {
     console.log(JSON.stringify(items, null, 2));
     return;
   }
-  heading(options.current ? "Current repository worktrees" : "Managed worktrees");
+  heading({ repository: "Current repository worktrees", all: "All worktrees", managed: "Managed worktrees" }[scope]);
   if (!items.length) {
     ui.info(pattern ? `No worktrees match '${pattern}'.` : "No worktrees found.");
     return;

@@ -32,7 +32,7 @@ describe("worktree discovery", () => {
     git(["branch", "feature/one"], repository);
     git(["worktree", "add", "-q", linked, "feature/one"], repository);
 
-    const items = listWorktrees({ root: join(repository, ".unused"), current: true, cwd: linked });
+    const items = listWorktrees({ root: join(repository, ".unused"), scope: "repository", cwd: linked });
     expect(items.map((item) => realpathSync(item.path))).toEqual([realpathSync(repository), realpathSync(linked)]);
     expect(items.every((item) => item.project === "sample-repo")).toBe(true);
   });
@@ -43,8 +43,8 @@ describe("worktree discovery", () => {
     const linked = join(repository, "..", "linked-location");
     git(["worktree", "add", "-q", linked, "feature/searchable"], repository);
 
-    expect(listWorktrees({ root: "unused", current: true, cwd: repository, pattern: "searchable" })).toHaveLength(1);
-    expect(listWorktrees({ root: "unused", current: true, cwd: repository, pattern: "missing" })).toHaveLength(0);
+    expect(listWorktrees({ root: "unused", scope: "repository", cwd: repository, pattern: "searchable" })).toHaveLength(1);
+    expect(listWorktrees({ root: "unused", scope: "repository", cwd: repository, pattern: "missing" })).toHaveLength(0);
   });
 
   test("derives a stable project name without an origin", () => {

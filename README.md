@@ -48,14 +48,14 @@ bun add --global git-wt
 ## Quick Start
 
 ```bash
-# List all worktrees
+# List worktrees of the current repository (all worktrees outside a repository)
 wt list
 
 # List worktrees matching pattern
 wt list sms
 
-# List only worktrees for current repository
-wt list --current
+# List worktrees of every known repository
+wt list --all
 
 # Create new branch + worktree
 wt create feature/new-ui
@@ -96,7 +96,7 @@ wt sg ui
 ## Commands
 
 ### Core Commands
-- `wt list | ls | l [pattern] [--current]` - List all worktrees with status (optional pattern filter, --current shows only current repo worktrees)
+- `wt list | ls | l [pattern] [--current | --all]` - List worktrees with status. Inside a repository it shows every worktree Git has registered for that repository, wherever it lives; outside one it shows all worktrees. `--all` shows the current repository plus every repository with a worktree in the managed directory. Passing `-d, --dir` lists only that directory
 - `wt create | new [branch] [base] [--copy <patterns>] [-d <path>]` - Create new branch + worktree (optionally from a `<base>` branch, optionally copy files/dirs, optionally override worktree location). With no branch, asks for a name and lets you search for the base
 - `wt checkout | co [branch] [-d <path>]` - Checkout existing branch in worktree. With no branch, search local and origin branches that have no worktree yet
 - `wt switch | sw [partial]` - Switch to worktree by partial branch name. With no name, or several matches, search the list
@@ -238,11 +238,11 @@ wt list sms
 wt l api      # Short alias
 wt ls test    # Alternative alias
 
-# List only worktrees for current repository
-wt list --current
+# List worktrees of every known repository, not just the current one
+wt list --all
 
-# Combine current repo filter with pattern
-wt list --current feature
+# Combine with a pattern
+wt list --all feature
 
 # Pattern matches branch names, project names, and paths
 wt list feature    # Shows all feature branches
@@ -294,7 +294,8 @@ Each folder contains a complete working directory for that branch. Branch names 
 - `-f, --force` - Force operations (overwrite/remove)
 - `-d, --dir <path>` - Use a different managed worktree directory
 - `--copy <patterns>` - Copy files/directories matching patterns to worktree (create only)
-- `--current` - Show only worktrees for current repository (list only)
+- `--current` - Show only worktrees for current repository (list default inside a repository, and clean)
+- `--all` - Show worktrees of every known repository (list only)
 - `--dry-run` - Show what would be deleted without doing it (delete only)
 - `-y, --yes` - Skip an interactive confirmation where supported
 - `--no-shell` - Create the worktree without opening a shell (create, checkout, and time)
@@ -360,6 +361,11 @@ The CLI uses Commander for strict command parsing, Clack for prompt primitives, 
 MIT License - see LICENSE file for details.
 
 ## Changelog
+
+### Unreleased
+- 🔧 **CHANGED**: Inside a repository, `wt list` now shows every worktree Git has registered for it, including ones created by other tools outside `~/.worktrees`. Outside a repository it shows all worktrees.
+- ✨ **NEW**: `wt list --all` shows worktrees of the current repository and of every repository with a worktree in the managed directory.
+- `wt list -d <path>` keeps the old behaviour: only folders inside that directory.
 
 ### v2.0.0
 - 🚀 **REWRITTEN**: Native TypeScript CLI bundled into a single Node.js executable with Bun.

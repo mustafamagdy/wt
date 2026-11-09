@@ -46,8 +46,9 @@ const directoryOption = ["-d, --dir <path>", "managed worktree directory", workt
 program
   .command("list [pattern]")
   .aliases(["ls", "l"])
-  .description("list managed worktrees")
-  .option("--current", "show every worktree registered to the current repository")
+  .description("list the current repository's worktrees (all worktrees outside a repository)")
+  .option("--current", "show every worktree registered to the current repository (default inside a repository)")
+  .option("--all", "show worktrees of every known repository: the current one and each one in the managed directory")
   .option("--json", "print stable machine-readable JSON")
   .option(...directoryOption)
   .action(listCommand);

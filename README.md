@@ -362,7 +362,7 @@ MIT License - see LICENSE file for details.
 
 ## Changelog
 
-### Unreleased
+### v2.4.0
 - 🔧 **CHANGED**: Inside a repository, `wt list` now shows every worktree Git has registered for it, including ones created by other tools outside `~/.worktrees`. Outside a repository it shows all worktrees.
 - ✨ **NEW**: `wt list --all` shows worktrees of the current repository and of every repository with a worktree in the managed directory.
 - `wt list -d <path>` keeps the old behaviour: only folders inside that directory.
